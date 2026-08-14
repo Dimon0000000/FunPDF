@@ -17,7 +17,8 @@ func (r *Router) Setup(e *gin.Engine) {
 		file := api.Group("/files")
 		{
 			file.POST("/upload")
-			file.POST("save")
+			file.POST("/:file_id")
+			file.GET("/:file_id") // Get the file
 		}
 
 		providers := api.Group("/providers")

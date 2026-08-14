@@ -3,7 +3,7 @@ package enetity
 type Provider struct {
 	ID   string
 	Name string
-	Base
+	BaseModel
 }
 
 func (Provider) TableName() string {
