@@ -5,6 +5,10 @@ import "github.com/gin-gonic/gin"
 type Router struct {
 }
 
+func NewRouter() *Router {
+	return &Router{}
+}
+
 func (r *Router) Setup(e *gin.Engine) {
 	api := e.Group("/api")
 	{
