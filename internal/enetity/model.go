@@ -5,7 +5,7 @@ type Model struct {
 	Name         string `json:"name"`
 	ProviderName string `json:"provider_name"`
 	ApiKey       string `json:"api_key"`
-	Base
+	BaseModel
 }
 
 func (Model) TableName() string {
