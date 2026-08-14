@@ -1,7 +1,14 @@
 package main
 
-import "fmt"
+import (
+	"FunPDF/internal"
+
+	"github.com/gin-gonic/gin"
+)
 
 func main() {
-	fmt.Println("hello world")
+	r := internal.NewRouter()
+	r.Setup(gin.Default())
+
+	run()
 }
