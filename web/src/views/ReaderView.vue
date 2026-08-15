@@ -17,6 +17,26 @@ function rotate() {
 function fitWidth() {
   viewerRef.value?.fitWidth()
 }
+
+function undo() {
+  viewerRef.value?.undo()
+}
+
+function redo() {
+  viewerRef.value?.redo()
+}
+
+function clearAnnotations() {
+  viewerRef.value?.clearAnnotations()
+}
+
+function exportPdf() {
+  void viewerRef.value?.exportPdf()
+}
+
+function printPdf() {
+  void viewerRef.value?.printPdf()
+}
 </script>
 
 <template>
@@ -25,6 +45,11 @@ function fitWidth() {
       @open-file="openFile"
       @rotate="rotate"
       @fit-width="fitWidth"
+      @undo="undo"
+      @redo="redo"
+      @clear-annotations="clearAnnotations"
+      @export-pdf="exportPdf"
+      @print-pdf="printPdf"
     />
 
     <section class="reader-body">

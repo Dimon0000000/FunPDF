@@ -1,24 +1,51 @@
 import { defineStore } from 'pinia'
 import type { ToolType } from '@/types/pdf'
 
+const SIDEBAR_STORAGE_KEY = 'funpdf.sidebarOpen'
+
+function initialSidebarState() {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
 export const useReaderStore = defineStore('reader', {
   state: () => ({
-    sidebarOpen: true,
+    sidebarOpen: initialSidebarState(),
     activeSidebar: 'pages',
     activeTool: 'cursor' as ToolType,
     currentPage: 1,
     totalPages: 0,
     scale: 1.15,
     documentName: '',
-    searchOpen: false,
+    annotationColor: '#ef4444',
+    annotationWidth: 3,
+    annotationCount: 0,
+    canUndo: false,
+    canRedo: false,
+    dirty: false,
+    statusMessage: '',
+    selectedText: '',
+    pageThumbnails: {} as Record<number, string>,
   }),
   actions: {
     toggleSidebar() {
-      this.sidebarOpen = !this.sidebarOpen
+      this.setSidebarOpen(!this.sidebarOpen)
+    },
+    setSidebarOpen(open: boolean) {
+      this.sidebarOpen = open
+      try {
+        window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(open))
+      } catch {
+        // Reading remains usable when storage is unavailable.
+      }
     },
     setActiveSidebar(id: string) {
       this.activeSidebar = id
-      this.sidebarOpen = true
+      this.setSidebarOpen(true)
     },
     setTool(tool: ToolType) {
       this.activeTool = tool
@@ -28,6 +55,17 @@ export const useReaderStore = defineStore('reader', {
     },
     zoomOut() {
       this.scale = Math.max(this.scale - 0.1, 0.4)
+    },
+    resetDocumentState() {
+      this.currentPage = 1
+      this.totalPages = 0
+      this.annotationCount = 0
+      this.canUndo = false
+      this.canRedo = false
+      this.dirty = false
+      this.statusMessage = ''
+      this.selectedText = ''
+      this.pageThumbnails = {}
     },
   },
 })

@@ -1,417 +1,1063 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { PDFArray, PDFDocument, PDFHexString, PDFName, rgb } from 'pdf-lib'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { useReaderStore } from '@/stores/reader'
+import type { PdfAnnotation, PdfPoint } from '@/types/pdf'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfWorker
 
-const store = useReaderStore()
-
-const canvasRef = ref<HTMLCanvasElement | null>(null)
-const fileInputRef = ref<HTMLInputElement | null>(null)
-const pdfDocument = ref<PDFDocumentProxy | null>(null)
-const loading = ref(false)
-const rotation = ref(0)
-
-let renderTask: ReturnType<Awaited<ReturnType<PDFDocumentProxy['getPage']>>['render']> | null = null
-
-function openFileDialog() {
-  fileInputRef.value?.click()
+type AnnotationMap = Record<number, PdfAnnotation[]>
+type PdfPage = Awaited<ReturnType<PDFDocumentProxy['getPage']>>
+type PageViewport = ReturnType<PdfPage['getViewport']>
+type RenderTask = ReturnType<PdfPage['render']>
+type TextLayerInstance = InstanceType<typeof pdfjsLib.TextLayer>
+type PageLayout = { pageNumber: number; width: number; height: number }
+type PageLink = {
+  id: string
+  left: number
+  top: number
+  width: number
+  height: number
+  url: string
+  dest?: unknown
+  action?: string
+  title: string
 }
+
+const store = useReaderStore()
+const stageRef = ref<HTMLElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const pdfDocument = shallowRef<PDFDocumentProxy | null>(null)
+const pageLayouts = ref<PageLayout[]>([])
+const pageLinks = ref<Record<number, PageLink[]>>({})
+const loading = ref(false)
+const exporting = ref(false)
+const dragActive = ref(false)
+const rotation = ref(0)
+const renderRevision = ref(0)
+const textSelection = ref({ open: false, page: 0, text: '', rects: [] as DOMRect[], left: 0, top: 0 })
+const noteEditor = ref({
+  open: false,
+  page: 0,
+  annotationId: '',
+  point: { x: 0, y: 0 } as PdfPoint,
+  text: '',
+  left: 0,
+  top: 0,
+})
+
+const pageElements = new Map<number, HTMLElement>()
+const pageCanvases = new Map<number, HTMLCanvasElement>()
+const annotationCanvases = new Map<number, HTMLCanvasElement>()
+const textLayerElements = new Map<number, HTMLDivElement>()
+const pageViewports = new Map<number, PageViewport>()
+const renderTasks = new Map<number, RenderTask>()
+const textLayers = new Map<number, TextLayerInstance>()
+const renderedPages = new Set<number>()
+const renderingPages = new Set<number>()
+
+let pdfLoadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null
+let originalBytes: Uint8Array | null = null
+let annotations: AnnotationMap = {}
+let undoStack: AnnotationMap[] = []
+let redoStack: AnnotationMap[] = []
+let drawingAnnotation: PdfAnnotation | null = null
+let drawingPage = 0
+let gestureHistorySaved = false
+let renderGeneration = 0
+let pageObserver: IntersectionObserver | null = null
+let scrollFrame = 0
+let pageChangeCameFromScroll = false
+let thumbnailGeneration = 0
+
+function setMapElement<T extends Element>(map: Map<number, T>, page: number, element: unknown) {
+  if (element instanceof Element) map.set(page, element as T)
+  else map.delete(page)
+}
+
+function setPageElement(element: unknown, page: number) { setMapElement(pageElements, page, element) }
+function setPageCanvas(element: unknown, page: number) { setMapElement(pageCanvases, page, element) }
+function setAnnotationCanvas(element: unknown, page: number) { setMapElement(annotationCanvases, page, element) }
+function setTextLayer(element: unknown, page: number) { setMapElement(textLayerElements, page, element) }
+
+function cloneAnnotations(source: AnnotationMap = annotations): AnnotationMap {
+  return JSON.parse(JSON.stringify(source)) as AnnotationMap
+}
+
+function annotationsForPage(page: number) {
+  if (!annotations[page]) annotations[page] = []
+  return annotations[page]
+}
+
+function updateHistoryState() {
+  store.canUndo = undoStack.length > 0
+  store.canRedo = redoStack.length > 0
+  store.annotationCount = Object.values(annotations).reduce((sum, page) => sum + page.length, 0)
+  renderRevision.value++
+}
+
+function pushHistory() {
+  undoStack.push(cloneAnnotations())
+  if (undoStack.length > 100) undoStack.shift()
+  redoStack = []
+  store.dirty = true
+  updateHistoryState()
+}
+
+function makeId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function setStatus(message: string) {
+  store.statusMessage = message
+  window.setTimeout(() => {
+    if (store.statusMessage === message) store.statusMessage = ''
+  }, 3200)
+}
+
+function openFileDialog() { fileInputRef.value?.click() }
 
 async function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (!file) return
+  if (file) await loadFile(file)
+  input.value = ''
+}
 
-  store.documentName = file.name
-  store.currentPage = 1
-  rotation.value = 0
+async function loadFile(file: File) {
+  if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+    setStatus('请选择 PDF 文件')
+    return
+  }
+
   loading.value = true
-
+  clearTextSelection(true)
   try {
-    const arrayBuffer = await file.arrayBuffer()
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer })
-    pdfDocument.value = await loadingTask.promise
-    store.totalPages = pdfDocument.value.numPages
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const nextTask = pdfjsLib.getDocument({ data: bytes.slice() })
+    const nextDocument = await nextTask.promise
+    await pdfLoadingTask?.destroy()
+    pdfLoadingTask = nextTask
+    pdfDocument.value = nextDocument
+    originalBytes = bytes
+    annotations = {}
+    undoStack = []
+    redoStack = []
+    rotation.value = 0
+    store.resetDocumentState()
+    store.documentName = file.name
+    store.totalPages = nextDocument.numPages
+    store.activeTool = 'cursor'
+    updateHistoryState()
+
     await nextTick()
-    await renderPage()
+    await setInitialFitWidth()
+    await refreshPageFlow(true)
+    void generateThumbnails()
+    setStatus(`已打开 ${file.name}`)
+  } catch (error) {
+    console.error(error)
+    setStatus('无法打开这个 PDF，文件可能已损坏或受密码保护')
   } finally {
     loading.value = false
-    input.value = ''
   }
 }
 
-async function renderPage() {
-  if (!pdfDocument.value || !canvasRef.value || store.totalPages === 0) return
+function handleDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  dragActive.value = true
+}
 
-  loading.value = true
+function handleDragLeave(event: DragEvent) {
+  if (event.currentTarget === event.target) dragActive.value = false
+}
 
-  try {
-    if (renderTask) {
-      try {
-        renderTask.cancel()
-      } catch {
-        // Ignore cancellation errors.
+async function handleDrop(event: DragEvent) {
+  event.preventDefault()
+  dragActive.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (file) await loadFile(file)
+}
+
+async function setInitialFitWidth() {
+  if (!pdfDocument.value || !stageRef.value) return
+  const page = await pdfDocument.value.getPage(1)
+  const viewport = page.getViewport({ scale: 1, rotation: rotation.value })
+  const available = Math.max(stageRef.value.clientWidth - 84, 260)
+  store.scale = Math.min(Math.max(available / viewport.width, 0.4), 3)
+}
+
+function cancelPageRendering() {
+  for (const task of renderTasks.values()) task.cancel()
+  for (const layer of textLayers.values()) layer.cancel()
+  renderTasks.clear()
+  textLayers.clear()
+  renderingPages.clear()
+  renderedPages.clear()
+}
+
+async function refreshPageFlow(scrollToCurrent = false) {
+  if (!pdfDocument.value || store.totalPages === 0) return
+  const generation = ++renderGeneration
+  cancelPageRendering()
+  clearTextSelection(true)
+  pageLinks.value = {}
+
+  const layouts = await Promise.all(
+    Array.from({ length: store.totalPages }, async (_, index) => {
+      const pageNumber = index + 1
+      const page = await pdfDocument.value!.getPage(pageNumber)
+      const viewport = page.getViewport({ scale: store.scale, rotation: rotation.value })
+      pageViewports.set(pageNumber, viewport)
+      return { pageNumber, width: viewport.width, height: viewport.height }
+    }),
+  )
+  if (generation !== renderGeneration) return
+  pageLayouts.value = layouts
+  await nextTick()
+  setupPageObserver()
+  await renderPage(store.currentPage, generation)
+  renderVisiblePages()
+  if (scrollToCurrent) await nextTick(() => scrollToPage(store.currentPage, false))
+}
+
+function setupPageObserver() {
+  pageObserver?.disconnect()
+  if (!stageRef.value || typeof IntersectionObserver === 'undefined') {
+    void renderPage(store.currentPage)
+    return
+  }
+  pageObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        const page = Number((entry.target as HTMLElement).dataset.page)
+        if (page) void renderPage(page)
       }
-      renderTask = null
     }
+  }, { root: stageRef.value, rootMargin: '900px 0px', threshold: 0.01 })
+  for (const element of pageElements.values()) pageObserver.observe(element)
+}
 
-    const page = await pdfDocument.value.getPage(store.currentPage)
-    const viewport = page.getViewport({
-      scale: store.scale,
-      rotation: rotation.value,
-    })
+function renderVisiblePages() {
+  const stage = stageRef.value
+  if (!stage) return
+  const stageRect = stage.getBoundingClientRect()
+  for (const [page, element] of pageElements) {
+    const rect = element.getBoundingClientRect()
+    if (rect.bottom >= stageRect.top - 900 && rect.top <= stageRect.bottom + 900) void renderPage(page)
+  }
+}
 
-    const canvas = canvasRef.value
+async function renderPage(pageNumber: number, generation = renderGeneration) {
+  if (!pdfDocument.value || renderedPages.has(pageNumber) || renderingPages.has(pageNumber)) return
+  const canvas = pageCanvases.get(pageNumber)
+  const annotationCanvas = annotationCanvases.get(pageNumber)
+  const textContainer = textLayerElements.get(pageNumber)
+  const viewport = pageViewports.get(pageNumber)
+  if (!canvas || !annotationCanvas || !textContainer || !viewport) return
+
+  renderingPages.add(pageNumber)
+  try {
+    const page = await pdfDocument.value.getPage(pageNumber)
+    if (generation !== renderGeneration) return
+    sizeCanvas(canvas, viewport)
     const context = canvas.getContext('2d')
     if (!context) return
-
-    const outputScale = window.devicePixelRatio || 1
-    canvas.width = Math.floor(viewport.width * outputScale)
-    canvas.height = Math.floor(viewport.height * outputScale)
-    canvas.style.width = `${Math.floor(viewport.width)}px`
-    canvas.style.height = `${Math.floor(viewport.height)}px`
-
-    const transform =
-      outputScale !== 1
-        ? [outputScale, 0, 0, outputScale, 0, 0]
-        : undefined
-
-    renderTask = page.render({
+    const scaleX = canvas.width / viewport.width
+    const scaleY = canvas.height / viewport.height
+    const task = page.render({
+      canvas,
       canvasContext: context,
-      transform,
+      transform: scaleX !== 1 || scaleY !== 1 ? [scaleX, 0, 0, scaleY, 0, 0] : undefined,
       viewport,
     })
+    renderTasks.set(pageNumber, task)
+    await task.promise
+    if (generation !== renderGeneration) return
 
-    await renderTask.promise
+    sizeCanvas(annotationCanvas, viewport)
+    drawAnnotations(pageNumber)
+    textContainer.replaceChildren()
+    textContainer.style.width = `${viewport.width}px`
+    textContainer.style.height = `${viewport.height}px`
+    textContainer.style.setProperty('--total-scale-factor', `${viewport.scale}`)
+    const layer = new pdfjsLib.TextLayer({
+      textContentSource: page.streamTextContent({ includeMarkedContent: true }),
+      container: textContainer,
+      viewport,
+    })
+    textLayers.set(pageNumber, layer)
+    await layer.render()
+    if (generation !== renderGeneration) return
+    await renderPageLinks(page, pageNumber, viewport)
+    if (generation !== renderGeneration) return
+    renderedPages.add(pageNumber)
+    createThumbnailFromCanvas(pageNumber, canvas)
   } catch (error: any) {
     if (error?.name !== 'RenderingCancelledException') {
       console.error(error)
+      setStatus(`第 ${pageNumber} 页渲染失败`)
     }
   } finally {
-    renderTask = null
-    loading.value = false
+    renderTasks.delete(pageNumber)
+    renderingPages.delete(pageNumber)
   }
 }
 
-function rotate() {
+function safeExternalUrl(value: unknown) {
+  if (typeof value !== 'string' || !value) return ''
+  try {
+    const url = new URL(value, window.location.href)
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol) ? url.href : ''
+  } catch {
+    return ''
+  }
+}
+
+async function renderPageLinks(page: PdfPage, pageNumber: number, viewport: PageViewport) {
+  const pageAnnotations = await page.getAnnotations({ intent: 'display' })
+  const links: PageLink[] = []
+  for (const annotation of pageAnnotations) {
+    if (annotation.subtype !== 'Link' || !Array.isArray(annotation.rect)) continue
+    const firstCorner = viewport.convertToViewportPoint(annotation.rect[0], annotation.rect[1])
+    const secondCorner = viewport.convertToViewportPoint(annotation.rect[2], annotation.rect[3])
+    const left = Math.min(firstCorner[0], secondCorner[0])
+    const top = Math.min(firstCorner[1], secondCorner[1])
+    const width = Math.abs(secondCorner[0] - firstCorner[0])
+    const height = Math.abs(secondCorner[1] - firstCorner[1])
+    if (width <= 0 || height <= 0) continue
+    const url = safeExternalUrl(annotation.url)
+    links.push({
+      id: annotation.id ?? `${pageNumber}-${links.length}`,
+      left,
+      top,
+      width,
+      height,
+      url,
+      dest: annotation.dest,
+      action: annotation.action,
+      title: url || annotation.action || '跳转到文档位置',
+    })
+  }
+  pageLinks.value = { ...pageLinks.value, [pageNumber]: links }
+}
+
+async function activatePdfLink(link: PageLink, event: MouseEvent) {
+  if (link.url) return
+  event.preventDefault()
+
+  if (link.action) {
+    const actions: Record<string, number> = {
+      FirstPage: 1,
+      PrevPage: Math.max(store.currentPage - 1, 1),
+      NextPage: Math.min(store.currentPage + 1, store.totalPages),
+      LastPage: store.totalPages,
+    }
+    const targetPage = actions[link.action]
+    if (targetPage) store.currentPage = targetPage
+    return
+  }
+
+  if (!pdfDocument.value || !link.dest) return
+  try {
+    const destination = typeof link.dest === 'string'
+      ? await pdfDocument.value.getDestination(link.dest)
+      : link.dest
+    if (!Array.isArray(destination) || destination.length === 0) return
+    const target = destination[0]
+    const pageIndex = typeof target === 'number'
+      ? target
+      : await pdfDocument.value.getPageIndex(target)
+    store.currentPage = pageIndex + 1
+  } catch (error) {
+    console.error(error)
+    setStatus('无法跳转到这个文档位置')
+  }
+}
+
+function sizeCanvas(canvas: HTMLCanvasElement, viewport: PageViewport) {
+  const scale = window.devicePixelRatio || 1
+  canvas.width = Math.max(Math.round(viewport.width * scale), 1)
+  canvas.height = Math.max(Math.round(viewport.height * scale), 1)
+  canvas.style.width = `${viewport.width}px`
+  canvas.style.height = `${viewport.height}px`
+}
+
+function createThumbnailFromCanvas(page: number, source: HTMLCanvasElement) {
+  if (store.pageThumbnails[page]) return
+  const width = 120
+  const height = Math.max(Math.round(width * source.height / source.width), 1)
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  canvas.getContext('2d')?.drawImage(source, 0, 0, width, height)
+  store.pageThumbnails = { ...store.pageThumbnails, [page]: canvas.toDataURL('image/jpeg', 0.76) }
+}
+
+async function generateThumbnails() {
+  if (!pdfDocument.value) return
+  const generation = ++thumbnailGeneration
+  for (let pageNumber = 1; pageNumber <= store.totalPages; pageNumber++) {
+    if (generation !== thumbnailGeneration || !pdfDocument.value) return
+    if (store.pageThumbnails[pageNumber]) continue
+    try {
+      const page = await pdfDocument.value.getPage(pageNumber)
+      const base = page.getViewport({ scale: 1, rotation: rotation.value })
+      const viewport = page.getViewport({ scale: 120 / base.width, rotation: rotation.value })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(Math.round(viewport.width), 1)
+      canvas.height = Math.max(Math.round(viewport.height), 1)
+      await page.render({ canvas, viewport }).promise
+      if (generation !== thumbnailGeneration) return
+      store.pageThumbnails = { ...store.pageThumbnails, [pageNumber]: canvas.toDataURL('image/jpeg', 0.76) }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+}
+
+function pageViewport(page: number) { return pageViewports.get(page) }
+
+function viewportPoint(point: PdfPoint, page: number): PdfPoint {
+  const viewport = pageViewport(page)
+  if (!viewport) return point
+  const [x, y] = viewport.convertToViewportPoint(point.x, point.y)
+  return { x, y }
+}
+
+function pdfPoint(point: PdfPoint, page: number): PdfPoint {
+  const viewport = pageViewport(page)
+  if (!viewport) return point
+  const [x, y] = viewport.convertToPdfPoint(point.x, point.y)
+  return { x, y }
+}
+
+function drawAnnotations(page: number) {
+  const canvas = annotationCanvases.get(page)
+  const viewport = pageViewport(page)
+  if (!canvas || !viewport) return
+  const context = canvas.getContext('2d')
+  if (!context) return
+  context.setTransform(canvas.width / viewport.width, 0, 0, canvas.height / viewport.height, 0, 0)
+  context.clearRect(0, 0, viewport.width, viewport.height)
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+
+  for (const annotation of annotations[page] ?? []) {
+    context.save()
+    context.strokeStyle = annotation.color
+    context.fillStyle = annotation.color
+    context.lineWidth = Math.max(annotation.width * store.scale, 1)
+    if (annotation.type === 'pen') {
+      if (annotation.points.length > 1) {
+        context.beginPath()
+        annotation.points.forEach((point, index) => {
+          const current = viewportPoint(point, page)
+          index === 0 ? context.moveTo(current.x, current.y) : context.lineTo(current.x, current.y)
+        })
+        context.stroke()
+      }
+    } else if (annotation.type === 'highlight') {
+      const start = viewportPoint(annotation.start, page)
+      const end = viewportPoint(annotation.end, page)
+      context.globalAlpha = 0.28
+      context.fillRect(Math.min(start.x, end.x), Math.min(start.y, end.y), Math.abs(end.x - start.x), Math.abs(end.y - start.y))
+    } else if (annotation.type === 'underline' || annotation.type === 'strike') {
+      const start = viewportPoint(annotation.start, page)
+      const end = viewportPoint(annotation.end, page)
+      context.beginPath()
+      context.moveTo(start.x, start.y)
+      context.lineTo(end.x, end.y)
+      context.stroke()
+    } else if (annotation.type === 'note') {
+      const point = viewportPoint(annotation.point, page)
+      context.beginPath()
+      context.arc(point.x, point.y, 11, 0, Math.PI * 2)
+      context.fill()
+      context.fillStyle = '#fff'
+      context.font = 'bold 12px sans-serif'
+      context.textAlign = 'center'
+      context.textBaseline = 'middle'
+      context.fillText('!', point.x, point.y + 0.5)
+    }
+    context.restore()
+  }
+}
+
+function redrawAnnotations() {
+  for (const page of renderedPages) drawAnnotations(page)
+  renderRevision.value++
+}
+
+function localPointerPosition(event: PointerEvent, page: number): PdfPoint {
+  const canvas = annotationCanvases.get(page)!
+  const viewport = pageViewport(page)!
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: Math.min(Math.max((event.clientX - rect.left) * viewport.width / rect.width, 0), viewport.width),
+    y: Math.min(Math.max((event.clientY - rect.top) * viewport.height / rect.height, 0), viewport.height),
+  }
+}
+
+function setCurrentPageFromView(page: number) {
+  if (store.currentPage === page) return
+  pageChangeCameFromScroll = true
+  store.currentPage = page
+}
+
+function startPointer(event: PointerEvent, page: number) {
+  const canvas = annotationCanvases.get(page)
+  if (!canvas || !pageViewport(page) || store.activeTool === 'cursor') return
+  event.preventDefault()
+  setCurrentPageFromView(page)
+  canvas.setPointerCapture(event.pointerId)
+  const local = localPointerPosition(event, page)
+  const point = pdfPoint(local, page)
+  drawingPage = page
+  gestureHistorySaved = false
+
+  if (store.activeTool === 'note') {
+    openNoteEditor(page, point, local)
+    return
+  }
+  if (store.activeTool === 'eraser') {
+    eraseAt(local, page)
+    return
+  }
+
+  pushHistory()
+  gestureHistorySaved = true
+  drawingAnnotation = store.activeTool === 'pen'
+    ? { id: makeId(), page, type: 'pen', color: store.annotationColor, width: store.annotationWidth / store.scale, points: [point] }
+    : { id: makeId(), page, type: store.activeTool, color: store.annotationColor, width: store.annotationWidth / store.scale, start: point, end: point }
+  annotationsForPage(page).push(drawingAnnotation as PdfAnnotation)
+  drawAnnotations(page)
+}
+
+function movePointer(event: PointerEvent, page: number) {
+  const canvas = annotationCanvases.get(page)
+  if (!canvas?.hasPointerCapture(event.pointerId)) return
+  const local = localPointerPosition(event, page)
+  if (store.activeTool === 'eraser') return eraseAt(local, page)
+  if (!drawingAnnotation || drawingPage !== page) return
+  const point = pdfPoint(local, page)
+  if (drawingAnnotation.type === 'pen') drawingAnnotation.points.push(point)
+  else if ('end' in drawingAnnotation) drawingAnnotation.end = point
+  drawAnnotations(page)
+}
+
+function endPointer(event: PointerEvent, page: number) {
+  const canvas = annotationCanvases.get(page)
+  if (canvas?.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
+  if (drawingAnnotation?.type === 'pen' && drawingAnnotation.points.length === 1) {
+    const first = drawingAnnotation.points[0]
+    drawingAnnotation.points.push({ x: first.x + 0.1, y: first.y + 0.1 })
+  }
+  drawingAnnotation = null
+  drawingPage = 0
+  if (gestureHistorySaved) updateHistoryState()
+  gestureHistorySaved = false
+  drawAnnotations(page)
+}
+
+function distanceToSegment(point: PdfPoint, start: PdfPoint, end: PdfPoint) {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  if (!dx && !dy) return Math.hypot(point.x - start.x, point.y - start.y)
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)))
+  return Math.hypot(point.x - start.x - t * dx, point.y - start.y - t * dy)
+}
+
+function hitAnnotation(annotation: PdfAnnotation, point: PdfPoint, page: number) {
+  if (annotation.type === 'note') {
+    const note = viewportPoint(annotation.point, page)
+    return Math.hypot(point.x - note.x, point.y - note.y) <= 16
+  }
+  if (annotation.type === 'highlight') {
+    const start = viewportPoint(annotation.start, page)
+    const end = viewportPoint(annotation.end, page)
+    return point.x >= Math.min(start.x, end.x) - 5 && point.x <= Math.max(start.x, end.x) + 5
+      && point.y >= Math.min(start.y, end.y) - 5 && point.y <= Math.max(start.y, end.y) + 5
+  }
+  if (annotation.type === 'underline' || annotation.type === 'strike') {
+    return distanceToSegment(point, viewportPoint(annotation.start, page), viewportPoint(annotation.end, page)) <= 9
+  }
+  if (annotation.type === 'pen') {
+    for (let index = 1; index < annotation.points.length; index++) {
+      if (distanceToSegment(point, viewportPoint(annotation.points[index - 1], page), viewportPoint(annotation.points[index], page)) <= 10) return true
+    }
+  }
+  return false
+}
+
+function eraseAt(point: PdfPoint, page: number) {
+  const pageAnnotations = annotationsForPage(page)
+  const reverseIndex = [...pageAnnotations].reverse().findIndex(annotation => hitAnnotation(annotation, point, page))
+  if (reverseIndex < 0) return
+  if (!gestureHistorySaved) { pushHistory(); gestureHistorySaved = true }
+  pageAnnotations.splice(pageAnnotations.length - 1 - reverseIndex, 1)
+  store.dirty = true
+  updateHistoryState()
+  drawAnnotations(page)
+}
+
+function noteMarkers(page: number) {
+  renderRevision.value
+  return (annotations[page] ?? [])
+    .filter(annotation => annotation.type === 'note')
+    .map(annotation => ({ annotation, point: viewportPoint(annotation.point, page) }))
+}
+
+function openNoteEditor(page: number, point: PdfPoint, local: PdfPoint, annotation?: PdfAnnotation) {
+  const viewport = pageViewport(page)
+  noteEditor.value = {
+    open: true,
+    page,
+    annotationId: annotation?.id ?? '',
+    point,
+    text: annotation?.type === 'note' ? annotation.text : '',
+    left: Math.min(local.x + 16, Math.max((viewport?.width ?? 320) - 280, 8)),
+    top: Math.min(local.y + 16, Math.max((viewport?.height ?? 220) - 190, 8)),
+  }
+  nextTick(() => document.querySelector<HTMLTextAreaElement>('.note-editor textarea')?.focus())
+}
+
+function saveNote() {
+  const text = noteEditor.value.text.trim()
+  if (!text) { noteEditor.value.open = false; return }
+  const page = noteEditor.value.page
+  pushHistory()
+  const existing = annotationsForPage(page).find(annotation => annotation.id === noteEditor.value.annotationId)
+  if (existing?.type === 'note') existing.text = text
+  else annotationsForPage(page).push({ id: makeId(), page, type: 'note', color: store.annotationColor, width: 1, point: noteEditor.value.point, text })
+  noteEditor.value.open = false
+  updateHistoryState()
+  drawAnnotations(page)
+}
+
+function clearTextSelection(removeNative = false) {
+  textSelection.value = { open: false, page: 0, text: '', rects: [], left: 0, top: 0 }
+  store.selectedText = ''
+  if (removeNative) window.getSelection()?.removeAllRanges()
+}
+
+function handleSelectionChange() {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return clearTextSelection()
+  let selectedPage = 0
+  let container: HTMLDivElement | undefined
+  for (const [page, layer] of textLayerElements) {
+    if (selection.anchorNode && selection.focusNode && layer.contains(selection.anchorNode) && layer.contains(selection.focusNode)) {
+      selectedPage = page
+      container = layer
+      break
+    }
+  }
+  if (!container || !selectedPage) return clearTextSelection()
+  const text = selection.toString().trim()
+  const containerRect = container.getBoundingClientRect()
+  const rects = Array.from(selection.getRangeAt(0).getClientRects()).filter(rect => rect.width > 0 && rect.height > 0)
+  if (!text || !rects.length) return clearTextSelection()
+  const first = rects[0]
+  textSelection.value = {
+    open: true,
+    page: selectedPage,
+    text,
+    rects,
+    left: Math.min(Math.max(first.left + first.width / 2 - containerRect.left, 112), Math.max(containerRect.width - 112, 112)),
+    top: Math.max(first.top - containerRect.top - 46, 8),
+  }
+  store.selectedText = text
+  setCurrentPageFromView(selectedPage)
+}
+
+function viewportRect(rect: DOMRect, page: number) {
+  const containerRect = textLayerElements.get(page)!.getBoundingClientRect()
+  const viewport = pageViewport(page)!
+  const sx = viewport.width / containerRect.width
+  const sy = viewport.height / containerRect.height
+  return {
+    left: (Math.max(rect.left, containerRect.left) - containerRect.left) * sx,
+    top: (Math.max(rect.top, containerRect.top) - containerRect.top) * sy,
+    right: (Math.min(rect.right, containerRect.right) - containerRect.left) * sx,
+    bottom: (Math.min(rect.bottom, containerRect.bottom) - containerRect.top) * sy,
+  }
+}
+
+function highlightSelectedText() {
+  const page = textSelection.value.page
+  if (!page || !pageViewport(page) || !textSelection.value.rects.length) return
+  pushHistory()
+  for (const clientRect of textSelection.value.rects) {
+    const rect = viewportRect(clientRect, page)
+    annotationsForPage(page).push({
+      id: makeId(), page, type: 'highlight', color: store.annotationColor, width: 1,
+      start: pdfPoint({ x: rect.left, y: rect.top }, page),
+      end: pdfPoint({ x: rect.right, y: rect.bottom }, page),
+    })
+  }
+  updateHistoryState()
+  clearTextSelection(true)
+  drawAnnotations(page)
+  setStatus('已高亮选中文字')
+}
+
+async function copySelectedText() {
+  if (!textSelection.value.text) return
+  try { await navigator.clipboard.writeText(textSelection.value.text); setStatus('选中文字已复制') }
+  catch { setStatus('复制失败，请使用 Ctrl+C') }
+}
+
+function undo() {
+  const previous = undoStack.pop()
+  if (!previous) return
+  redoStack.push(cloneAnnotations())
+  annotations = cloneAnnotations(previous)
+  store.dirty = true
+  updateHistoryState()
+  redrawAnnotations()
+}
+
+function redo() {
+  const next = redoStack.pop()
+  if (!next) return
+  undoStack.push(cloneAnnotations())
+  annotations = cloneAnnotations(next)
+  store.dirty = true
+  updateHistoryState()
+  redrawAnnotations()
+}
+
+function clearAnnotations() {
+  if (!store.annotationCount) return
+  pushHistory()
+  annotations = {}
+  updateHistoryState()
+  redrawAnnotations()
+  setStatus('已清除全部标注，可使用撤销恢复')
+}
+
+async function fitWidth() {
+  await setInitialFitWidth()
+}
+
+async function rotate() {
   rotation.value = (rotation.value + 90) % 360
+  store.pageThumbnails = {}
+  await refreshPageFlow(true)
+  void generateThumbnails()
 }
 
-function fitWidth() {
-  store.scale = 1.15
+function handleStageScroll() {
+  if (scrollFrame) return
+  scrollFrame = window.requestAnimationFrame(() => {
+    scrollFrame = 0
+    const stage = stageRef.value
+    if (!stage || !pageElements.size) return
+    const stageRect = stage.getBoundingClientRect()
+    const readingLine = stageRect.top + Math.min(stageRect.height * 0.34, 260)
+    let closestPage = store.currentPage
+    let closestDistance = Number.POSITIVE_INFINITY
+    for (const [page, element] of pageElements) {
+      const rect = element.getBoundingClientRect()
+      const distance = readingLine >= rect.top && readingLine <= rect.bottom
+        ? 0
+        : Math.min(Math.abs(readingLine - rect.top), Math.abs(readingLine - rect.bottom))
+      if (distance < closestDistance) { closestDistance = distance; closestPage = page }
+    }
+    setCurrentPageFromView(closestPage)
+    renderVisiblePages()
+  })
 }
 
-defineExpose({
-  openFileDialog,
-  rotate,
-  fitWidth,
+function scrollToPage(page: number, smooth = true) {
+  const stage = stageRef.value
+  const element = pageElements.get(page)
+  if (!stage || !element) return
+  stage.scrollTo({ top: Math.max(element.offsetTop - 22, 0), behavior: smooth ? 'smooth' : 'auto' })
+  void renderPage(page)
+}
+
+function hexToRgb(color: string) {
+  const value = color.replace('#', '')
+  const normalized = value.length === 3 ? value.split('').map(char => char + char).join('') : value
+  return rgb(Number.parseInt(normalized.slice(0, 2), 16) / 255, Number.parseInt(normalized.slice(2, 4), 16) / 255, Number.parseInt(normalized.slice(4, 6), 16) / 255)
+}
+
+async function buildAnnotatedPdf() {
+  if (!originalBytes) throw new Error('No PDF loaded')
+  const output = await PDFDocument.load(originalBytes.slice())
+  const pages = output.getPages()
+  for (const pageAnnotations of Object.values(annotations)) {
+    for (const annotation of pageAnnotations) {
+      const page = pages[annotation.page - 1]
+      if (!page) continue
+      const color = hexToRgb(annotation.color)
+      if (annotation.type === 'pen') {
+        for (let index = 1; index < annotation.points.length; index++) page.drawLine({ start: annotation.points[index - 1], end: annotation.points[index], thickness: Math.max(annotation.width, 0.5), color, opacity: 0.95 })
+      } else if (annotation.type === 'highlight') {
+        page.drawRectangle({ x: Math.min(annotation.start.x, annotation.end.x), y: Math.min(annotation.start.y, annotation.end.y), width: Math.abs(annotation.end.x - annotation.start.x), height: Math.abs(annotation.end.y - annotation.start.y), color, opacity: 0.28, borderWidth: 0 })
+      } else if (annotation.type === 'underline' || annotation.type === 'strike') {
+        page.drawLine({ start: annotation.start, end: annotation.end, thickness: Math.max(annotation.width, 0.5), color, opacity: 0.95 })
+      } else if (annotation.type === 'note') {
+        const dictionary = output.context.obj({ Type: 'Annot', Subtype: 'Text', Rect: [annotation.point.x, annotation.point.y, annotation.point.x + 18, annotation.point.y + 18], Contents: PDFHexString.fromText(annotation.text), Name: 'Comment', C: [1, 0.76, 0.03], Open: false })
+        const reference = output.context.register(dictionary)
+        const existing = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray)
+        if (existing) existing.push(reference)
+        else page.node.set(PDFName.of('Annots'), output.context.obj([reference]))
+      }
+    }
+  }
+  return output.save()
+}
+
+function makePdfBlob(bytes: Uint8Array) {
+  return new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: 'application/pdf' })
+}
+
+async function exportPdf() {
+  if (!originalBytes || exporting.value) return
+  exporting.value = true
+  try {
+    const url = URL.createObjectURL(makePdfBlob(await buildAnnotatedPdf()))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${store.documentName.replace(/\.pdf$/i, '') || 'document'}-已标注.pdf`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    store.dirty = false
+    setStatus('带标注的 PDF 已导出')
+  } catch (error) { console.error(error); setStatus('导出失败，请重试') }
+  finally { exporting.value = false }
+}
+
+async function printPdf() {
+  if (!originalBytes || exporting.value) return
+  exporting.value = true
+  try {
+    const url = URL.createObjectURL(makePdfBlob(await buildAnnotatedPdf()))
+    const frame = document.createElement('iframe')
+    Object.assign(frame.style, { position: 'fixed', width: '1px', height: '1px', opacity: '0' })
+    frame.src = url
+    frame.onload = () => frame.contentWindow?.print()
+    document.body.appendChild(frame)
+    window.setTimeout(() => { frame.remove(); URL.revokeObjectURL(url) }, 60_000)
+  } catch (error) { console.error(error); setStatus('无法准备打印文件，请重试') }
+  finally { exporting.value = false }
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey)) return
+  const key = event.key.toLowerCase()
+  if (key === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo() }
+  else if (key === 'y') { event.preventDefault(); redo() }
+  else if (key === 's' && store.totalPages) { event.preventDefault(); void exportPdf() }
+}
+
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!store.dirty) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+defineExpose({ openFileDialog, rotate, fitWidth, undo, redo, clearAnnotations, exportPdf, printPdf })
+
+watch(() => store.scale, () => void refreshPageFlow(true))
+watch(() => store.currentPage, page => {
+  if (pageChangeCameFromScroll) { pageChangeCameFromScroll = false; return }
+  const normalized = Math.min(Math.max(Math.round(page || 1), 1), Math.max(store.totalPages, 1))
+  if (normalized !== page) { store.currentPage = normalized; return }
+  scrollToPage(normalized)
+}, { flush: 'sync' })
+watch(() => store.activeTool, (tool, previous) => {
+  if (tool === 'highlight' && previous === 'cursor' && textSelection.value.open) return highlightSelectedText()
+  if (tool !== 'cursor') clearTextSelection(true)
 })
 
-watch(
-  () => [store.currentPage, store.scale],
-  () => {
-    void renderPage()
-  },
-)
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  document.addEventListener('selectionchange', handleSelectionChange)
+})
 
 onBeforeUnmount(() => {
-  pdfDocument.value?.destroy()
+  window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  document.removeEventListener('selectionchange', handleSelectionChange)
+  pageObserver?.disconnect()
+  if (scrollFrame) cancelAnimationFrame(scrollFrame)
+  cancelPageRendering()
+  void pdfLoadingTask?.destroy()
 })
 </script>
 
 <template>
   <section class="viewer">
-    <input
-      ref="fileInputRef"
-      class="hidden-input"
-      type="file"
-      accept="application/pdf,.pdf"
-      @change="handleFileChange"
-    />
-
-    <div v-if="store.searchOpen" class="searchbar">
-      <i class="fa-solid fa-magnifying-glass"></i>
-      <input placeholder="在文档中搜索..." />
-      <span>0 / 0</span>
-      <button title="上一个"><i class="fa-solid fa-chevron-up"></i></button>
-      <button title="下一个"><i class="fa-solid fa-chevron-down"></i></button>
-      <button title="关闭" @click="store.searchOpen = false">
-        <i class="fa-solid fa-xmark"></i>
-      </button>
-    </div>
-
-    <div class="page-stage">
+    <input ref="fileInputRef" class="hidden-input" type="file" accept="application/pdf,.pdf" @change="handleFileChange" />
+    <div
+      ref="stageRef"
+      class="page-stage"
+      @scroll.passive="handleStageScroll"
+      @dragenter.prevent="dragActive = true"
+      @dragover="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+    >
       <div v-if="store.totalPages === 0" class="empty-state">
-        <div class="empty-icon">
-          <i class="fa-regular fa-file-pdf"></i>
-        </div>
-        <h1>打开一个 PDF 开始阅读</h1>
-        <p>FunPDF 将提供阅读、批注、翻译以及后续可选的 AI 能力。</p>
-        <button @click="openFileDialog">
-          <i class="fa-regular fa-folder-open"></i>
-          打开 PDF
-        </button>
+        <div class="empty-icon"><i class="fa-regular fa-file-pdf"></i></div>
+        <h1>打开一个 PDF 开始编辑</h1>
+        <p>文件只在你的浏览器中处理。打开后可使用上方工具进行画笔、高亮、划线、擦除与便签标注。</p>
+        <button @click="openFileDialog"><i class="fa-regular fa-folder-open"></i>选择本地 PDF</button>
+        <span class="drop-hint">也可以将文件拖放到这里</span>
       </div>
 
-      <div v-else class="canvas-wrap">
-        <canvas ref="canvasRef" class="pdf-canvas"></canvas>
-        <div class="annotation-layer" :data-tool="store.activeTool"></div>
+      <div v-else class="page-flow">
+        <article
+          v-for="layout in pageLayouts"
+          :key="layout.pageNumber"
+          :ref="element => setPageElement(element, layout.pageNumber)"
+          class="page-shell"
+          :class="{ current: store.currentPage === layout.pageNumber }"
+          :data-page="layout.pageNumber"
+          :data-active-tool="store.activeTool"
+          :style="{ width: `${layout.width}px`, height: `${layout.height}px` }"
+        >
+          <canvas :ref="element => setPageCanvas(element, layout.pageNumber)" class="pdf-canvas"></canvas>
+          <div :ref="element => setTextLayer(element, layout.pageNumber)" class="textLayer text-layer"></div>
+          <canvas
+            :ref="element => setAnnotationCanvas(element, layout.pageNumber)"
+            class="annotation-canvas"
+            :data-tool="store.activeTool"
+            @pointerdown="startPointer($event, layout.pageNumber)"
+            @pointermove="movePointer($event, layout.pageNumber)"
+            @pointerup="endPointer($event, layout.pageNumber)"
+            @pointercancel="endPointer($event, layout.pageNumber)"
+          ></canvas>
+
+          <div class="link-layer" aria-label="PDF 链接">
+            <template v-for="link in pageLinks[layout.pageNumber] ?? []" :key="link.id">
+              <a
+                v-if="link.url"
+                class="pdf-link"
+                :href="link.url"
+                :title="link.title"
+                :style="{ left: `${link.left}px`, top: `${link.top}px`, width: `${link.width}px`, height: `${link.height}px` }"
+                target="_blank"
+                rel="noopener noreferrer"
+                @click="setCurrentPageFromView(layout.pageNumber)"
+              ></a>
+              <button
+                v-else
+                class="pdf-link"
+                :title="link.title"
+                :style="{ left: `${link.left}px`, top: `${link.top}px`, width: `${link.width}px`, height: `${link.height}px` }"
+                @click="activatePdfLink(link, $event)"
+              ></button>
+            </template>
+          </div>
+
+          <button
+            v-for="marker in noteMarkers(layout.pageNumber)"
+            :key="marker.annotation.id"
+            class="note-marker"
+            :style="{ left: `${marker.point.x}px`, top: `${marker.point.y}px`, backgroundColor: marker.annotation.color }"
+            title="打开便签"
+            @mousedown.stop
+            @click="openNoteEditor(layout.pageNumber, marker.annotation.point, marker.point, marker.annotation)"
+          >!</button>
+
+          <div
+            v-if="textSelection.open && textSelection.page === layout.pageNumber"
+            class="selection-toolbar"
+            :style="{ left: `${textSelection.left}px`, top: `${textSelection.top}px` }"
+            @mousedown.prevent
+          >
+            <button @click="copySelectedText"><i class="fa-regular fa-copy"></i>复制</button>
+            <span></span>
+            <button @click="highlightSelectedText"><i class="fa-solid fa-highlighter"></i>高亮</button>
+          </div>
+
+          <div
+            v-if="noteEditor.open && noteEditor.page === layout.pageNumber"
+            class="note-editor"
+            :style="{ left: `${noteEditor.left}px`, top: `${noteEditor.top}px` }"
+            @pointerdown.stop
+          >
+            <strong>{{ noteEditor.annotationId ? '编辑便签' : '添加便签' }}</strong>
+            <textarea v-model="noteEditor.text" maxlength="500" placeholder="输入备注内容…"></textarea>
+            <div><button class="secondary" @click="noteEditor.open = false">取消</button><button @click="saveNote">保存</button></div>
+          </div>
+        </article>
       </div>
 
-      <div v-if="loading && store.totalPages > 0" class="loading">
-        <i class="fa-solid fa-circle-notch fa-spin"></i>
-        正在渲染…
-      </div>
+      <div v-if="dragActive" class="drop-overlay"><i class="fa-regular fa-file-pdf"></i><strong>松开以打开 PDF</strong></div>
+      <div v-if="(loading || exporting) && store.totalPages > 0" class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i>{{ exporting ? '正在生成文件…' : '正在准备页面…' }}</div>
     </div>
 
+    <div v-if="store.statusMessage" class="status-message">{{ store.statusMessage }}</div>
     <footer v-if="store.totalPages > 0" class="page-footer">
-      <button
-        :disabled="store.currentPage <= 1"
-        @click="store.currentPage--"
-      >
-        <i class="fa-solid fa-chevron-left"></i>
-      </button>
-
-      <input
-        v-model.number="store.currentPage"
-        type="number"
-        :min="1"
-        :max="store.totalPages"
-      />
-
+      <button :disabled="store.currentPage <= 1" title="上一页" @click="store.currentPage--"><i class="fa-solid fa-chevron-left"></i></button>
+      <input v-model.number="store.currentPage" type="number" :min="1" :max="store.totalPages" aria-label="当前页码" />
       <span>/ {{ store.totalPages }}</span>
-
-      <button
-        :disabled="store.currentPage >= store.totalPages"
-        @click="store.currentPage++"
-      >
-        <i class="fa-solid fa-chevron-right"></i>
-      </button>
+      <button :disabled="store.currentPage >= store.totalPages" title="下一页" @click="store.currentPage++"><i class="fa-solid fa-chevron-right"></i></button>
     </footer>
   </section>
 </template>
 
 <style scoped>
-.viewer {
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  background: #e9e9e9;
-}
-
-.hidden-input {
-  display: none;
-}
-
-.searchbar {
-  position: absolute;
-  z-index: 12;
-  top: 10px;
-  right: 18px;
-  height: 42px;
-  padding: 0 8px 0 12px;
-  border-radius: 8px;
-  background: #fafafa;
-  border: 1px solid #d4d4d4;
-  box-shadow: 0 5px 20px rgb(0 0 0 / 12%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #71767b;
-}
-
-.searchbar input {
-  width: 220px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: #30343a;
-}
-
-.searchbar span {
-  font-size: 12px;
-  color: #90959a;
-}
-
-.searchbar button {
-  border: 0;
-  background: transparent;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  cursor: pointer;
-  color: #696e74;
-}
-
-.searchbar button:hover {
-  background: #ececec;
-}
-
-.page-stage {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  display: grid;
-  place-items: start center;
-  padding: 36px 42px 84px;
-  position: relative;
-}
-
-.empty-state {
-  align-self: center;
-  justify-self: center;
-  margin-top: 14vh;
-  text-align: center;
-  color: #70757a;
-  max-width: 480px;
-}
-
-.empty-icon {
-  width: 72px;
-  height: 72px;
-  margin: 0 auto 18px;
-  border-radius: 18px;
-  background: #f5f5f5;
-  border: 1px solid #d9d9d9;
-  display: grid;
-  place-items: center;
-  font-size: 28px;
-  color: #666b70;
-}
-
-.empty-state h1 {
-  margin: 0 0 10px;
-  font-size: 22px;
-  color: #33373c;
-  font-weight: 650;
-}
-
-.empty-state p {
-  margin: 0 auto 24px;
-  line-height: 1.8;
-  font-size: 13px;
-  color: #858a90;
-}
-
-.empty-state button {
-  height: 40px;
-  padding: 0 17px;
-  border: 1px solid #cfcfcf;
-  background: #f8f8f8;
-  color: #393e44;
-  border-radius: 7px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.empty-state button:hover {
-  background: #efefef;
-}
-
-.canvas-wrap {
-  position: relative;
-  background: white;
-  box-shadow:
-    0 2px 8px rgb(0 0 0 / 8%),
-    0 12px 28px rgb(0 0 0 / 9%);
-}
-
-.pdf-canvas {
-  display: block;
-  background: white;
-}
-
-.annotation-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.annotation-layer[data-tool='pen'],
-.annotation-layer[data-tool='highlight'],
-.annotation-layer[data-tool='eraser'],
-.annotation-layer[data-tool='underline'],
-.annotation-layer[data-tool='strike'],
-.annotation-layer[data-tool='note'] {
-  pointer-events: auto;
-  cursor: crosshair;
-}
-
-.loading {
-  position: absolute;
-  left: 50%;
-  top: 24px;
-  transform: translateX(-50%);
-  background: rgb(255 255 255 / 92%);
-  border: 1px solid #d8d8d8;
-  border-radius: 8px;
-  padding: 9px 13px;
-  font-size: 12px;
-  color: #666b70;
-  box-shadow: 0 3px 12px rgb(0 0 0 / 8%);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.page-footer {
-  position: absolute;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  height: 40px;
-  padding: 0 8px;
-  border: 1px solid #d3d3d3;
-  background: rgb(250 250 250 / 96%);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 10%);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.page-footer button {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  color: #5f6469;
-}
-
-.page-footer button:hover:not(:disabled) {
-  background: #e8e8e8;
-}
-
-.page-footer button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.page-footer input {
-  width: 42px;
-  height: 28px;
-  border-radius: 5px;
-  border: 1px solid #d7d7d7;
-  background: white;
-  text-align: center;
-  color: #3f4449;
-  outline: none;
-}
-
-.page-footer span {
-  font-size: 12px;
-  color: #777c81;
-  padding-right: 4px;
-}
+.viewer { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; position: relative; background: #e9e9e9; }
+.hidden-input { display: none; }
+.page-stage { flex: 1; min-height: 0; overflow: auto; position: relative; padding: 28px 42px 84px; scroll-behavior: auto; }
+.page-flow { width: max-content; min-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.page-shell { position: relative; flex: 0 0 auto; overflow: hidden; background: white; box-shadow: 0 2px 9px rgb(0 0 0 / 12%), 0 12px 26px rgb(0 0 0 / 8%); }
+.page-shell.current { outline: 1px solid rgb(85 90 96 / 22%); }
+.pdf-canvas { display: block; background: white; }
+.text-layer { position: absolute; inset: 0; z-index: 1; overflow: clip; line-height: 1; letter-spacing: normal; word-spacing: normal; text-align: initial; transform-origin: 0 0; -webkit-text-size-adjust: none; text-size-adjust: none; pointer-events: none; user-select: none; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.page-shell[data-active-tool='cursor'] .text-layer { pointer-events: auto; user-select: text; }
+.text-layer :deep(span), .text-layer :deep(br) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0 0; user-select: text; }
+.text-layer :deep(> :not(.markedContent)), .text-layer :deep(.markedContent span:not(.markedContent)) { z-index: 1; --font-height: 0; --scale-x: 1; --rotate: 0deg; font-size: calc(var(--text-scale-factor) * var(--font-height)); transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.text-layer :deep(.markedContent) { display: contents; }
+.text-layer :deep(::selection) { color: transparent; background: rgb(90 104 120 / 25%); }
+.annotation-canvas { position: absolute; inset: 0; z-index: 2; display: block; touch-action: none; }
+.annotation-canvas[data-tool='cursor'] { pointer-events: none; cursor: text; }
+.annotation-canvas[data-tool='pen'], .annotation-canvas[data-tool='highlight'], .annotation-canvas[data-tool='underline'], .annotation-canvas[data-tool='strike'] { cursor: crosshair; }
+.annotation-canvas[data-tool='eraser'] { cursor: cell; }
+.annotation-canvas[data-tool='note'] { cursor: copy; }
+.link-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.pdf-link { position: absolute; display: block; padding: 0; border: 0; border-radius: 2px; background: transparent; pointer-events: none; }
+.page-shell[data-active-tool='cursor'] .pdf-link { pointer-events: auto; cursor: pointer; }
+.page-shell[data-active-tool='cursor'] .pdf-link:hover { outline: 1px solid rgb(75 85 99 / 35%); background: rgb(120 130 140 / 8%); }
+.pdf-link:focus-visible { outline: 2px solid #555b62; outline-offset: 1px; }
+.note-marker { position: absolute; z-index: 4; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 0; border-radius: 50%; color: white; font: 700 12px/22px sans-serif; box-shadow: 0 1px 3px rgb(0 0 0 / 22%); pointer-events: none; }
+.page-shell[data-active-tool='cursor'] .note-marker { pointer-events: auto; cursor: pointer; }
+.selection-toolbar { position: absolute; z-index: 6; transform: translateX(-50%); height: 36px; display: flex; align-items: center; padding: 3px; border: 1px solid #c8c8c8; border-radius: 7px; background: rgb(250 250 250 / 98%); box-shadow: 0 5px 16px rgb(0 0 0 / 18%); }
+.selection-toolbar button { height: 28px; padding: 0 9px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 5px; background: transparent; color: #3f4449; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.selection-toolbar button:hover { background: #e8e8e8; }
+.selection-toolbar > span { width: 1px; height: 20px; background: #ddd; }
+.note-editor { position: absolute; z-index: 7; width: 260px; padding: 13px; border-radius: 10px; background: #fffdf5; border: 1px solid #ead99c; box-shadow: 0 10px 30px rgb(0 0 0 / 20%); }
+.note-editor strong { display: block; margin-bottom: 8px; color: #713f12; font-size: 13px; }
+.note-editor textarea { width: 100%; height: 92px; resize: vertical; border: 1px solid #e4d6ad; border-radius: 6px; padding: 8px; outline: none; color: #422006; background: white; font-size: 13px; }
+.note-editor > div { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
+.note-editor button { border: 0; border-radius: 6px; padding: 6px 11px; background: #6a5b48; color: white; cursor: pointer; font-size: 12px; }
+.note-editor button.secondary { background: transparent; color: #785b35; }
+.empty-state { margin: 13vh auto 0; text-align: center; color: #70757a; max-width: 500px; }
+.empty-icon { width: 76px; height: 76px; margin: 0 auto 20px; border-radius: 20px; background: #f7f7f7; border: 1px solid #d5d5d5; display: grid; place-items: center; font-size: 30px; color: #5f6469; box-shadow: 0 10px 30px rgb(0 0 0 / 6%); }
+.empty-state h1 { margin: 0 0 10px; font-size: 23px; color: #33373c; }
+.empty-state p { margin: 0 auto 24px; line-height: 1.75; font-size: 13px; color: #858a90; }
+.empty-state button { height: 42px; padding: 0 18px; border: 1px solid #c9c9c9; background: #f8f8f8; color: #34383d; border-radius: 8px; cursor: pointer; }
+.drop-hint { display: block; margin-top: 13px; font-size: 12px; color: #999da2; }
+.drop-overlay { position: absolute; inset: 18px; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border: 2px dashed #85898e; border-radius: 16px; background: rgb(247 247 247 / 94%); color: #44494f; font-size: 18px; pointer-events: none; }
+.loading { position: fixed; left: 50%; top: 82px; transform: translateX(-50%); z-index: 8; background: rgb(255 255 255 / 94%); border: 1px solid #d8d8d8; border-radius: 8px; padding: 9px 13px; font-size: 12px; color: #666b70; box-shadow: 0 3px 12px rgb(0 0 0 / 8%); display: flex; gap: 8px; align-items: center; }
+.status-message { position: absolute; left: 50%; bottom: 70px; z-index: 15; transform: translateX(-50%); padding: 9px 14px; border-radius: 8px; background: rgb(55 58 62 / 94%); color: white; font-size: 12px; }
+.page-footer { position: absolute; left: 50%; bottom: 16px; z-index: 12; transform: translateX(-50%); height: 40px; padding: 0 8px; border: 1px solid #d3d3d3; background: rgb(250 250 250 / 96%); box-shadow: 0 4px 16px rgb(0 0 0 / 10%); border-radius: 8px; display: flex; align-items: center; gap: 5px; }
+.page-footer button { width: 30px; height: 30px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: #5f6469; }
+.page-footer button:hover:not(:disabled) { background: #e8e8e8; }
+.page-footer button:disabled { opacity: 0.35; cursor: default; }
+.page-footer input { width: 44px; height: 28px; border-radius: 5px; border: 1px solid #d7d7d7; background: white; text-align: center; color: #3f4449; outline: none; }
+.page-footer span { font-size: 12px; color: #777c81; padding-right: 4px; }
+@media (max-width: 720px) { .page-stage { padding: 20px 18px 76px; } .page-flow { gap: 12px; } }
 </style>
