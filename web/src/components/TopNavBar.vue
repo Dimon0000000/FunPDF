@@ -10,6 +10,7 @@ const emit = defineEmits<{
   undo: []
   redo: []
   clearAnnotations: []
+  saveProject: []
   exportPdf: []
   printPdf: []
 }>()
@@ -125,10 +126,13 @@ function chooseTool(tool: ToolType) {
       <span v-if="store.documentName" class="document-name" :title="store.documentName">
         {{ store.dirty ? '● ' : '' }}{{ store.documentName }}
       </span>
-      <button class="icon-button" :disabled="!hasDocument" title="打印带标注的 PDF" @click="emit('printPdf')">
+      <button class="icon-button" :disabled="!hasDocument" title="保存可编辑工程（Ctrl+S）" @click="emit('saveProject')">
+        <i class="fa-regular fa-floppy-disk"></i>
+      </button>
+      <button class="icon-button" :disabled="!hasDocument" title="打印扁平化 PDF" @click="emit('printPdf')">
         <i class="fa-solid fa-print"></i>
       </button>
-      <button class="export-button" :disabled="!hasDocument" title="下载带标注的 PDF" @click="emit('exportPdf')">
+      <button class="export-button" :disabled="!hasDocument" title="保存工程并导出扁平化 PDF" @click="emit('exportPdf')">
         <i class="fa-solid fa-download"></i>
         <span>导出</span>
       </button>

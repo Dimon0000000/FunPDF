@@ -2,10 +2,11 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { PDFArray, PDFDocument, PDFHexString, PDFName, rgb } from 'pdf-lib'
+import { PDFDocument, rgb } from 'pdf-lib'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { useReaderStore } from '@/stores/reader'
 import type { PdfAnnotation, PdfPoint } from '@/types/pdf'
+import { createProjectBlob, parseProjectText, type ProjectEditorState } from '@/utils/projectFile'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfWorker
 
@@ -26,6 +27,13 @@ type PageLink = {
   action?: string
   title: string
 }
+type LocalFileHandle = {
+  name: string
+  getFile(): Promise<File>
+  createWritable(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }>
+}
+type OpenFilePicker = (options: Record<string, unknown>) => Promise<LocalFileHandle[]>
+type SaveFilePicker = (options: Record<string, unknown>) => Promise<LocalFileHandle>
 
 const store = useReaderStore()
 const stageRef = ref<HTMLElement | null>(null)
@@ -34,6 +42,7 @@ const pdfDocument = shallowRef<PDFDocumentProxy | null>(null)
 const pageLayouts = ref<PageLayout[]>([])
 const pageLinks = ref<Record<number, PageLink[]>>({})
 const loading = ref(false)
+const saving = ref(false)
 const exporting = ref(false)
 const dragActive = ref(false)
 const rotation = ref(0)
@@ -72,6 +81,8 @@ let pageObserver: IntersectionObserver | null = null
 let scrollFrame = 0
 let pageChangeCameFromScroll = false
 let thumbnailGeneration = 0
+let projectFileHandle: LocalFileHandle | null = null
+let projectFilename = 'document.funpdf'
 
 function setMapElement<T extends Element>(map: Map<number, T>, page: number, element: unknown) {
   if (element instanceof Element) map.set(page, element as T)
@@ -118,7 +129,32 @@ function setStatus(message: string) {
   }, 3200)
 }
 
-function openFileDialog() { fileInputRef.value?.click() }
+async function openFileDialog() {
+  const picker = (window as Window & { showOpenFilePicker?: OpenFilePicker }).showOpenFilePicker
+  if (!picker) {
+    fileInputRef.value?.click()
+    return
+  }
+  try {
+    const [handle] = await picker({
+      multiple: false,
+      types: [{
+        description: 'PDF 或 FunPDF 工程',
+        accept: {
+          'application/pdf': ['.pdf'],
+          'application/x-funpdf+json': ['.funpdf'],
+        },
+      }],
+    })
+    if (!handle) return
+    await loadFile(await handle.getFile(), handle)
+  } catch (error: any) {
+    if (error?.name !== 'AbortError') {
+      console.error(error)
+      setStatus('无法打开文件')
+    }
+  }
+}
 
 async function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement
@@ -127,43 +163,65 @@ async function handleFileChange(event: Event) {
   input.value = ''
 }
 
-async function loadFile(file: File) {
-  if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
-    setStatus('请选择 PDF 文件')
+async function loadFile(file: File, handle: LocalFileHandle | null = null) {
+  const lowerName = file.name.toLowerCase()
+  if (!lowerName.endsWith('.pdf') && !lowerName.endsWith('.funpdf') && file.type !== 'application/pdf') {
+    setStatus('请选择 PDF 或 FunPDF 工程文件')
     return
   }
 
   loading.value = true
   clearTextSelection(true)
   try {
-    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (lowerName.endsWith('.funpdf')) {
+      const { project, pdfBytes } = parseProjectText(await file.text())
+      projectFileHandle = handle
+      projectFilename = file.name
+      await openPdfBytes(pdfBytes, project.document.name, {
+        annotations: project.editor.annotations,
+        rotation: project.editor.rotation,
+        scale: project.editor.scale,
+        currentPage: project.editor.current_page,
+      })
+      setStatus(`已打开可编辑工程 ${file.name}`)
+    } else {
+      projectFileHandle = null
+      projectFilename = `${file.name.replace(/\.pdf$/i, '') || 'document'}.funpdf`
+      await openPdfBytes(new Uint8Array(await file.arrayBuffer()), file.name)
+      setStatus(`已打开 ${file.name}`)
+    }
+  } catch (error) {
+    console.error(error)
+    setStatus(lowerName.endsWith('.funpdf') ? '无法打开工程，文件可能已损坏或版本不受支持' : '无法打开这个 PDF，文件可能已损坏或受密码保护')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function openPdfBytes(bytes: Uint8Array, documentName: string, restored?: ProjectEditorState) {
     const nextTask = pdfjsLib.getDocument({ data: bytes.slice() })
     const nextDocument = await nextTask.promise
     await pdfLoadingTask?.destroy()
     pdfLoadingTask = nextTask
     pdfDocument.value = nextDocument
     originalBytes = bytes
-    annotations = {}
+    annotations = restored ? cloneAnnotations(restored.annotations) : {}
     undoStack = []
     redoStack = []
-    rotation.value = 0
+    rotation.value = restored?.rotation ?? 0
     store.resetDocumentState()
-    store.documentName = file.name
+    store.documentName = documentName
     store.totalPages = nextDocument.numPages
     store.activeTool = 'cursor'
+    store.currentPage = Math.min(Math.max(restored?.currentPage ?? 1, 1), nextDocument.numPages)
+    if (restored) store.scale = Math.min(Math.max(restored.scale, 0.4), 3)
     updateHistoryState()
+    store.dirty = false
 
     await nextTick()
-    await setInitialFitWidth()
+    if (!restored) await setInitialFitWidth()
     await refreshPageFlow(true)
     void generateThumbnails()
-    setStatus(`已打开 ${file.name}`)
-  } catch (error) {
-    console.error(error)
-    setStatus('无法打开这个 PDF，文件可能已损坏或受密码保护')
-  } finally {
-    loading.value = false
-  }
 }
 
 function handleDragOver(event: DragEvent) {
@@ -788,7 +846,42 @@ function hexToRgb(color: string) {
   return rgb(Number.parseInt(normalized.slice(0, 2), 16) / 255, Number.parseInt(normalized.slice(2, 4), 16) / 255, Number.parseInt(normalized.slice(4, 6), 16) / 255)
 }
 
-async function buildAnnotatedPdf() {
+async function createFlattenedNoteImage(output: PDFDocument, text: string, color: string) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 720
+  canvas.height = 400
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas is unavailable')
+  context.fillStyle = '#fff8cf'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.strokeStyle = color
+  context.lineWidth = 10
+  context.strokeRect(5, 5, canvas.width - 10, canvas.height - 10)
+  context.fillStyle = '#4b4332'
+  context.font = 'bold 34px "Microsoft YaHei", sans-serif'
+  context.fillText('便签', 36, 58)
+  context.font = '28px "Microsoft YaHei", sans-serif'
+  const maxWidth = canvas.width - 72
+  const lineHeight = 42
+  let line = ''
+  let y = 112
+  for (const character of text) {
+    const next = line + character
+    if (context.measureText(next).width > maxWidth || character === '\n') {
+      context.fillText(line, 36, y)
+      line = character === '\n' ? '' : character
+      y += lineHeight
+      if (y > canvas.height - 40) break
+    } else {
+      line = next
+    }
+  }
+  if (line && y <= canvas.height - 40) context.fillText(line, 36, y)
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Could not render note')), 'image/png'))
+  return output.embedPng(new Uint8Array(await blob.arrayBuffer()))
+}
+
+async function buildFlattenedPdf() {
   if (!originalBytes) throw new Error('No PDF loaded')
   const output = await PDFDocument.load(originalBytes.slice())
   const pages = output.getPages()
@@ -804,11 +897,17 @@ async function buildAnnotatedPdf() {
       } else if (annotation.type === 'underline' || annotation.type === 'strike') {
         page.drawLine({ start: annotation.start, end: annotation.end, thickness: Math.max(annotation.width, 0.5), color, opacity: 0.95 })
       } else if (annotation.type === 'note') {
-        const dictionary = output.context.obj({ Type: 'Annot', Subtype: 'Text', Rect: [annotation.point.x, annotation.point.y, annotation.point.x + 18, annotation.point.y + 18], Contents: PDFHexString.fromText(annotation.text), Name: 'Comment', C: [1, 0.76, 0.03], Open: false })
-        const reference = output.context.register(dictionary)
-        const existing = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray)
-        if (existing) existing.push(reference)
-        else page.node.set(PDFName.of('Annots'), output.context.obj([reference]))
+        const image = await createFlattenedNoteImage(output, annotation.text, annotation.color)
+        const size = page.getSize()
+        const width = Math.min(180, size.width)
+        const height = width * image.height / image.width
+        page.drawImage(image, {
+          x: Math.min(Math.max(annotation.point.x, 0), Math.max(size.width - width, 0)),
+          y: Math.min(Math.max(annotation.point.y - height, 0), Math.max(size.height - height, 0)),
+          width,
+          height,
+          opacity: 0.96,
+        })
       }
     }
   }
@@ -819,18 +918,66 @@ function makePdfBlob(bytes: Uint8Array) {
   return new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: 'application/pdf' })
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+async function saveProject(options: { quiet?: boolean } = {}) {
+  if (!originalBytes || saving.value) return false
+  saving.value = true
+  try {
+    const blob = createProjectBlob(store.documentName, originalBytes, {
+      annotations: cloneAnnotations(),
+      rotation: rotation.value,
+      scale: store.scale,
+      currentPage: store.currentPage,
+    })
+    if (projectFileHandle) {
+      const writable = await projectFileHandle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+    } else {
+      const picker = (window as Window & { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker
+      if (picker) {
+        projectFileHandle = await picker({
+          suggestedName: projectFilename,
+          types: [{ description: 'FunPDF 可编辑工程', accept: { 'application/x-funpdf+json': ['.funpdf'] } }],
+        })
+        projectFilename = projectFileHandle.name
+        const writable = await projectFileHandle.createWritable()
+        await writable.write(blob)
+        await writable.close()
+      } else {
+        downloadBlob(blob, projectFilename)
+      }
+    }
+    store.dirty = false
+    if (!options.quiet) setStatus('可编辑工程已保存，可重新打开继续编辑')
+    return true
+  } catch (error: any) {
+    if (error?.name !== 'AbortError') {
+      console.error(error)
+      setStatus('保存工程失败，请重试')
+    }
+    return false
+  } finally {
+    saving.value = false
+  }
+}
+
 async function exportPdf() {
-  if (!originalBytes || exporting.value) return
+  if (!originalBytes || exporting.value || saving.value) return
+  if (!await saveProject({ quiet: true })) return
   exporting.value = true
   try {
-    const url = URL.createObjectURL(makePdfBlob(await buildAnnotatedPdf()))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${store.documentName.replace(/\.pdf$/i, '') || 'document'}-已标注.pdf`
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    store.dirty = false
-    setStatus('带标注的 PDF 已导出')
+    const filename = `${store.documentName.replace(/\.pdf$/i, '') || 'document'}-扁平化.pdf`
+    downloadBlob(makePdfBlob(await buildFlattenedPdf()), filename)
+    setStatus('工程已保存，并已导出扁平化 PDF')
   } catch (error) { console.error(error); setStatus('导出失败，请重试') }
   finally { exporting.value = false }
 }
@@ -839,7 +986,7 @@ async function printPdf() {
   if (!originalBytes || exporting.value) return
   exporting.value = true
   try {
-    const url = URL.createObjectURL(makePdfBlob(await buildAnnotatedPdf()))
+    const url = URL.createObjectURL(makePdfBlob(await buildFlattenedPdf()))
     const frame = document.createElement('iframe')
     Object.assign(frame.style, { position: 'fixed', width: '1px', height: '1px', opacity: '0' })
     frame.src = url
@@ -855,7 +1002,7 @@ function handleKeydown(event: KeyboardEvent) {
   const key = event.key.toLowerCase()
   if (key === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo() }
   else if (key === 'y') { event.preventDefault(); redo() }
-  else if (key === 's' && store.totalPages) { event.preventDefault(); void exportPdf() }
+  else if (key === 's' && store.totalPages) { event.preventDefault(); void saveProject() }
 }
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
@@ -864,7 +1011,7 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = ''
 }
 
-defineExpose({ openFileDialog, rotate, fitWidth, undo, redo, clearAnnotations, exportPdf, printPdf })
+defineExpose({ openFileDialog, rotate, fitWidth, undo, redo, clearAnnotations, saveProject, exportPdf, printPdf })
 
 watch(() => store.scale, () => void refreshPageFlow(true))
 watch(() => store.currentPage, page => {
@@ -897,7 +1044,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="viewer">
-    <input ref="fileInputRef" class="hidden-input" type="file" accept="application/pdf,.pdf" @change="handleFileChange" />
+    <input ref="fileInputRef" class="hidden-input" type="file" accept="application/pdf,.pdf,.funpdf" @change="handleFileChange" />
     <div
       ref="stageRef"
       class="page-stage"
@@ -995,7 +1142,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="dragActive" class="drop-overlay"><i class="fa-regular fa-file-pdf"></i><strong>松开以打开 PDF</strong></div>
-      <div v-if="(loading || exporting) && store.totalPages > 0" class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i>{{ exporting ? '正在生成文件…' : '正在准备页面…' }}</div>
+      <div v-if="(loading || saving || exporting) && store.totalPages > 0" class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i>{{ exporting ? '正在生成扁平化 PDF…' : saving ? '正在保存工程…' : '正在准备页面…' }}</div>
     </div>
 
     <div v-if="store.statusMessage" class="status-message">{{ store.statusMessage }}</div>
