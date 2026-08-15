@@ -30,6 +30,10 @@ function clearAnnotations() {
   viewerRef.value?.clearAnnotations()
 }
 
+function saveProject() {
+  void viewerRef.value?.saveProject()
+}
+
 function exportPdf() {
   void viewerRef.value?.exportPdf()
 }
@@ -48,6 +52,7 @@ function printPdf() {
       @undo="undo"
       @redo="redo"
       @clear-annotations="clearAnnotations"
+      @save-project="saveProject"
       @export-pdf="exportPdf"
       @print-pdf="printPdf"
     />

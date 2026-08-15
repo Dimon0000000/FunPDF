@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { useReaderStore } from '@/stores/reader'
 import type { SidebarItem } from '@/types/pdf'
+import ProjectPanel from '@/components/ProjectPanel.vue'
+import ProviderPanel from '@/components/ProviderPanel.vue'
+import TranslationPanel from '@/components/TranslationPanel.vue'
 
 const store = useReaderStore()
 
 const items: SidebarItem[] = [
+  { id: 'albums', label: '项目', icon: 'fa-regular fa-folder-open' },
   { id: 'pages', label: '页面', icon: 'fa-regular fa-file-lines' },
   { id: 'annotations', label: '标注', icon: 'fa-regular fa-comment-dots' },
   { id: 'outline', label: '目录', icon: 'fa-solid fa-list' },
@@ -49,7 +53,11 @@ function selectItem(id: string) {
           </button>
         </div>
 
-        <div v-if="store.activeSidebar === 'pages'" class="panel-content">
+        <div v-if="store.activeSidebar === 'albums'" class="panel-content">
+          <ProjectPanel />
+        </div>
+
+        <div v-else-if="store.activeSidebar === 'pages'" class="panel-content">
           <div v-if="store.totalPages === 0" class="empty">打开 PDF 后，这里会显示页面列表。</div>
           <button
             v-for="page in store.totalPages"
@@ -88,11 +96,7 @@ function selectItem(id: string) {
         </div>
 
         <div v-else-if="store.activeSidebar === 'translation'" class="panel-content">
-          <div v-if="store.selectedText" class="selected-text-card">
-            <span>当前选中文本</span>
-            <p>{{ store.selectedText }}</p>
-          </div>
-          <div class="feature-card"><i class="fa-solid fa-language"></i><div><strong>划词翻译</strong><p>翻译服务将在后续版本中接入。</p></div></div>
+          <TranslationPanel />
         </div>
 
         <div v-else-if="store.activeSidebar === 'references'" class="panel-content">
@@ -100,6 +104,7 @@ function selectItem(id: string) {
         </div>
 
         <div v-else class="panel-content">
+          <ProviderPanel />
           <div class="feature-card"><i class="fa-solid fa-wand-magic-sparkles"></i><div><strong>AI 功能</strong><p>解释、摘要、问答和论文检索将在后续版本中提供。</p></div></div>
         </div>
       </section>
@@ -122,7 +127,7 @@ function selectItem(id: string) {
 .panel-subtitle { width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font-size: 11px; color: #94a3b8; }
 .close-button { width: 30px; height: 30px; border-radius: 6px; }
 .close-button:hover { background: #e9eef3; }
-.panel-content { padding: 12px; overflow: auto; }
+.panel-content { min-height: 0; padding: 12px; overflow: auto; }
 .empty { padding: 18px 12px; font-size: 13px; line-height: 1.7; color: #8491a3; text-align: center; }
 .page-item { width: 100%; border: 0; background: transparent; border-radius: 8px; padding: 8px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: #64686e; text-align: left; }
 .page-item:hover, .page-item.active { background: #e9eef5; }
@@ -134,9 +139,6 @@ function selectItem(id: string) {
 .annotation-summary span { font-size: 12px; }
 .tip-card { margin-top: 10px; padding: 12px; border-radius: 8px; background: #f0f0f0; color: #676c72; font-size: 12px; line-height: 1.6; }
 .tip-card i { color: #666c73; margin-right: 5px; }
-.selected-text-card { margin-bottom: 10px; padding: 12px; border: 1px solid #dedede; border-radius: 8px; background: white; }
-.selected-text-card span { font-size: 11px; color: #8b8f94; }
-.selected-text-card p { max-height: 120px; margin: 7px 0 0; overflow: auto; color: #44494f; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .feature-card { padding: 14px; border-radius: 9px; border: 1px solid #e2e2e2; background: #f7f7f7; display: flex; gap: 12px; color: #565b61; }
 .feature-card i { margin-top: 3px; }
 .feature-card strong { display: block; margin-bottom: 5px; color: #35393e; font-size: 13px; }
