@@ -6,7 +6,10 @@ import { PDFDocument, rgb } from 'pdf-lib'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { useReaderStore } from '@/stores/reader'
 import type { PdfAnnotation, PdfPoint } from '@/types/pdf'
-import { createProjectBlob, parseProjectText, type ProjectEditorState } from '@/utils/projectFile'
+import { FUNPDF_EDITOR_STATE_FORMAT, FUNPDF_PROJECT_VERSION, type FunPdfEditorState } from '@/types/project'
+import { parseProjectText, type ProjectEditorState } from '@/utils/projectFile'
+import { cachePdfFile, saveEditorState } from '@/api/files'
+import { apiErrorMessage } from '@/api/http'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfWorker
 
@@ -30,10 +33,8 @@ type PageLink = {
 type LocalFileHandle = {
   name: string
   getFile(): Promise<File>
-  createWritable(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }>
 }
 type OpenFilePicker = (options: Record<string, unknown>) => Promise<LocalFileHandle[]>
-type SaveFilePicker = (options: Record<string, unknown>) => Promise<LocalFileHandle>
 
 const store = useReaderStore()
 const stageRef = ref<HTMLElement | null>(null)
@@ -81,8 +82,9 @@ let pageObserver: IntersectionObserver | null = null
 let scrollFrame = 0
 let pageChangeCameFromScroll = false
 let thumbnailGeneration = 0
-let projectFileHandle: LocalFileHandle | null = null
-let projectFilename = 'document.funpdf'
+let cachedFileId = ''
+let cachedFileRevision = 0
+let cachedFileSha256 = ''
 
 function setMapElement<T extends Element>(map: Map<number, T>, page: number, element: unknown) {
   if (element instanceof Element) map.set(page, element as T)
@@ -147,7 +149,7 @@ async function openFileDialog() {
       }],
     })
     if (!handle) return
-    await loadFile(await handle.getFile(), handle)
+    await loadFile(await handle.getFile())
   } catch (error: any) {
     if (error?.name !== 'AbortError') {
       console.error(error)
@@ -163,7 +165,7 @@ async function handleFileChange(event: Event) {
   input.value = ''
 }
 
-async function loadFile(file: File, handle: LocalFileHandle | null = null) {
+async function loadFile(file: File) {
   const lowerName = file.name.toLowerCase()
   if (!lowerName.endsWith('.pdf') && !lowerName.endsWith('.funpdf') && file.type !== 'application/pdf') {
     setStatus('请选择 PDF 或 FunPDF 工程文件')
@@ -174,9 +176,10 @@ async function loadFile(file: File, handle: LocalFileHandle | null = null) {
   clearTextSelection(true)
   try {
     if (lowerName.endsWith('.funpdf')) {
+      cachedFileId = ''
+      cachedFileRevision = 0
+      cachedFileSha256 = ''
       const { project, pdfBytes } = parseProjectText(await file.text())
-      projectFileHandle = handle
-      projectFilename = file.name
       await openPdfBytes(pdfBytes, project.document.name, {
         annotations: project.editor.annotations,
         rotation: project.editor.rotation,
@@ -185,10 +188,11 @@ async function loadFile(file: File, handle: LocalFileHandle | null = null) {
       })
       setStatus(`已打开可编辑工程 ${file.name}`)
     } else {
-      projectFileHandle = null
-      projectFilename = `${file.name.replace(/\.pdf$/i, '') || 'document'}.funpdf`
+      cachedFileId = ''
+      cachedFileRevision = 0
+      cachedFileSha256 = ''
       await openPdfBytes(new Uint8Array(await file.arrayBuffer()), file.name)
-      setStatus(`已打开 ${file.name}`)
+      setStatus(`已打开 ${file.name}；按 Ctrl+S 存入本地文件库`)
     }
   } catch (error) {
     console.error(error)
@@ -931,38 +935,49 @@ async function saveProject(options: { quiet?: boolean } = {}) {
   if (!originalBytes || saving.value) return false
   saving.value = true
   try {
-    const blob = createProjectBlob(store.documentName, originalBytes, {
+    const savedAt = new Date().toISOString()
+    const editor: FunPdfEditorState['editor'] = {
       annotations: cloneAnnotations(),
       rotation: rotation.value,
       scale: store.scale,
-      currentPage: store.currentPage,
-    })
-    if (projectFileHandle) {
-      const writable = await projectFileHandle.createWritable()
-      await writable.write(blob)
-      await writable.close()
-    } else {
-      const picker = (window as Window & { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker
-      if (picker) {
-        projectFileHandle = await picker({
-          suggestedName: projectFilename,
-          types: [{ description: 'FunPDF 可编辑工程', accept: { 'application/x-funpdf+json': ['.funpdf'] } }],
-        })
-        projectFilename = projectFileHandle.name
-        const writable = await projectFileHandle.createWritable()
-        await writable.write(blob)
-        await writable.close()
-      } else {
-        downloadBlob(blob, projectFilename)
-      }
+      current_page: store.currentPage,
     }
+
+    const state: FunPdfEditorState = {
+      format: FUNPDF_EDITOR_STATE_FORMAT,
+      version: FUNPDF_PROJECT_VERSION,
+      saved_at: savedAt,
+      source: {
+        name: store.documentName,
+        mime_type: 'application/pdf',
+        sha256: cachedFileSha256 || undefined,
+      },
+      editor,
+    }
+
+    if (cachedFileId) {
+      const result = await saveEditorState(cachedFileId, cachedFileRevision, state)
+      cachedFileRevision = result.revision
+      store.dirty = false
+      if (!options.quiet) setStatus(`编辑状态已保存到 Cache/${cachedFileId}（版本 ${cachedFileRevision}）`)
+      return true
+    }
+
+    const sourceFile = new File([makePdfBlob(originalBytes)], store.documentName || 'document.pdf', {
+      type: 'application/pdf',
+    })
+    const cached = await cachePdfFile(sourceFile, state)
+    cachedFileId = cached.id
+    cachedFileRevision = cached.revision
+    cachedFileSha256 = cached.sha256
     store.dirty = false
-    if (!options.quiet) setStatus('可编辑工程已保存，可重新打开继续编辑')
+    window.dispatchEvent(new Event('funpdf:files-changed'))
+    if (!options.quiet) setStatus(`已存入本地文件库：Cache/${cached.id}`)
     return true
   } catch (error: any) {
     if (error?.name !== 'AbortError') {
       console.error(error)
-      setStatus('保存工程失败，请重试')
+      setStatus(apiErrorMessage(error, '保存工程失败，请重试'))
     }
     return false
   } finally {

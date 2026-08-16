@@ -14,16 +14,28 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
+# Dependency directories
 # vendor/
 
 # Go workspace file
 go.work
 go.work.sum
 
-# env file
+# Environment files
 .env
+.env.*
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# TypeScript incremental build metadata
+*.tsbuildinfo
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# Runtime cache
+Cache/
+cache/
+
+# Build outputs
+build/
+dist/
