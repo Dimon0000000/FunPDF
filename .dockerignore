@@ -1,0 +1,8 @@
+.git
+.idea
+.github
+web/node_modules
+web/dist
+Cache
+*.exe
+docker-compose.yml
