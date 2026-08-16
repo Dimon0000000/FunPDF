@@ -21,6 +21,7 @@ import (
 	"FunPDF/internal/entity"
 	"FunPDF/internal/handler"
 	"log"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,7 +33,10 @@ func main() {
 	router := internal.NewRouter(fileHandler)
 	router.Setup(r)
 
-	dsn := "root:password@(127.0.0.1:3306)/funpdf?charset=utf8&parseTime=True&loc=Local"
+	dsn := os.Getenv("FUNPDF_MYSQL_DSN")
+	if dsn == "" {
+		dsn = "root:password@(127.0.0.1:3306)/funpdf?charset=utf8&parseTime=True&loc=Local"
+	}
 	if err := dao.InitMysql(dsn); err != nil {
 		log.Fatalf("initialize MySQL: %v", err)
 	}
@@ -43,7 +47,11 @@ func main() {
 	common.Banner()
 	log.Printf("FunPDF %s", common.GetVersion())
 
-	if err := r.Run(":9384"); err != nil {
+	addr := os.Getenv("FUNPDF_ADDR")
+	if addr == "" {
+		addr = ":9384"
+	}
+	if err := r.Run(addr); err != nil {
 		log.Fatalf("start backend: %v", err)
 	}
 }
