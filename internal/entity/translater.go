@@ -1,1 +1,1 @@
-package enetity
+package entity

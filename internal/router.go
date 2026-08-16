@@ -1,37 +1,32 @@
 package internal
 
-import "github.com/gin-gonic/gin"
+import (
+	"FunPDF/internal/handler"
+
+	"github.com/gin-gonic/gin"
+)
 
 type Router struct {
+	fileHandler *handler.FileHandler
 }
 
-func NewRouter() *Router {
-	return &Router{}
+// NewRouter create a new router
+func NewRouter(fileHandler *handler.FileHandler) *Router {
+	return &Router{
+		fileHandler: fileHandler,
+	}
 }
 
+// Setup register all API routes
 func (r *Router) Setup(e *gin.Engine) {
 	api := e.Group("/api")
 	{
-		api.GET("/index")
-
-		file := api.Group("/files")
+		files := api.Group("/files")
 		{
-			file.POST("/upload")
-			file.POST("/:file_id")
-			file.GET("/:file_id") // Get the file
-		}
-
-		providers := api.Group("/providers")
-		{
-			providers.GET("/") // GET all providers
-			providers.POST("/:provider_name/create")
-			providers.PUT("/:provider_name/update")
-		}
-
-		translate := api.Group("/translaters")
-		{
-			translate.POST("/:translater_name/completion")
+			files.GET("", r.fileHandler.ListFiles)
+			files.POST("", r.fileHandler.UploadFile)
+			files.PATCH("/:file_id/state", r.fileHandler.SaveFile)
+			files.DELETE("/:file_id", r.fileHandler.DeleteFile)
 		}
 	}
-
 }

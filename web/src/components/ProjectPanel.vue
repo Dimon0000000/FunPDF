@@ -115,13 +115,7 @@ onMounted(async () => {
       <button :disabled="busy || !lookupId.trim()" title="读取合集" @click="loadAlbum()"><i class="fa-solid fa-arrow-right"></i></button>
     </div>
 
-    <button
-      v-for="album in albums"
-      :key="album.id"
-      class="album-card"
-      :class="{ active: selected?.id === album.id }"
-      @click="selected = album"
-    >
+    <button v-for="album in albums" :key="album.id" class="album-card" :class="{ active: selected?.id === album.id }" @click="selected = album">
       <span class="album-avatar"><i class="fa-regular fa-folder-open"></i></span>
       <span><strong>{{ album.name }}</strong><small>{{ album.description || album.id }}</small></span>
     </button>
@@ -134,7 +128,6 @@ onMounted(async () => {
       <label>名称<input v-model="selected.name" /></label>
       <label>描述<textarea v-model="selected.description" rows="3"></textarea></label>
       <div class="button-row"><button @click="save">保存</button><button class="danger" @click="removeAlbum">删除</button></div>
-
       <div class="section-title files-title">合集文件</div>
       <div class="lookup-row"><input v-model="fileId" placeholder="输入 file_id" @keyup.enter="addFile" /><button :disabled="!fileId.trim()" @click="addFile"><i class="fa-solid fa-plus"></i></button></div>
       <div v-for="file in selected.files ?? []" :key="file.id" class="file-row"><span>{{ file.name || file.id }}</span><button title="从合集中移除" @click="removeFile(file)"><i class="fa-solid fa-xmark"></i></button></div>

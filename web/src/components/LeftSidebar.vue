@@ -107,6 +107,7 @@ function selectItem(id: string) {
           <ProviderPanel />
           <div class="feature-card"><i class="fa-solid fa-wand-magic-sparkles"></i><div><strong>AI 功能</strong><p>解释、摘要、问答和论文检索将在后续版本中提供。</p></div></div>
         </div>
+
       </section>
     </transition>
   </aside>

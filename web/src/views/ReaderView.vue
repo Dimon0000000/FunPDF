@@ -41,6 +41,7 @@ function exportPdf() {
 function printPdf() {
   void viewerRef.value?.printPdf()
 }
+
 </script>
 
 <template>

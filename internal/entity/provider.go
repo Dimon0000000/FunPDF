@@ -1,8 +1,8 @@
-package enetity
+package entity
 
 type Provider struct {
-	ID   string
-	Name string
+	ID   string `gorm:"primary_key" json:"id"`
+	Name string `json:"name"`
 	BaseModel
 }
 
