@@ -97,6 +97,12 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"code": http.StatusCreated, "msg": "success", "data": file})
 }
 
+// AlertFile update the file metadata
+func (h *FileHandler) AlertFile(c *gin.Context) {
+
+}
+
+// DeleteFile delete the file
 func (h *FileHandler) DeleteFile(c *gin.Context) {
 	fileID := strings.TrimSpace(c.Param("file_id"))
 	if fileID == "" {
