@@ -1,8 +1,10 @@
 package dao
 
 import (
+	"FunPDF/internal/dto"
 	"FunPDF/internal/entity"
 	"context"
+	"fmt"
 
 	"gorm.io/gorm"
 )
@@ -41,3 +43,61 @@ func (d *AlbumDAO) ListAlbumFiles(ctx context.Context, db *gorm.DB, albumID stri
 	}
 	return files, nil
 }
+
+// UpdateAlbum update the album
+func (d *AlbumDAO) UpdateAlbum(ctx context.Context, db *gorm.DB, req *dto.UpdateAlbumRequest) (int64, error) {
+	result := db.WithContext(ctx).Model(&entity.Album{}).
+		First(&entity.Album{}, "id = ?", req.ID).
+		Updates(entity.Album{
+			Name:        req.Name,
+			Thumbnail:   req.Thumbnail,
+			Description: req.Description,
+		})
+	return result.RowsAffected, result.Error
+}
+
+// DeleteAlbum delete the album
+func (d *AlbumDAO) DeleteAlbum(ctx context.Context, db *gorm.DB, albumID string) (int64, error) {
+	result := db.WithContext(ctx).Model(&entity.AlbumFile{}).
+		Where("album_id = ?", albumID).
+		Delete(&entity.AlbumFile{})
+	return result.RowsAffected, result.Error
+}
+
+// UploadFilesToAlbum upload a batch of files to album
+func (d *AlbumDAO) UploadFilesToAlbum(ctx context.Context, db *gorm.DB, albumID string, fileIDs []string) (map[string]any, int64, error) {
+	unSaved := make(map[string]any)
+
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, fileID := range fileIDs {
+			err := tx.Model(&entity.AlbumFile{}).
+				Create(&entity.AlbumFile{
+					AlbumID: albumID,
+					FileID:  fileID,
+				}).Error
+
+			if err != nil {
+				unSaved[fileID] = err.Error()
+			}
+		}
+		if len(unSaved) == len(fileIDs) {
+			return fmt.Errorf("upload files to album failed: no files to upload")
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return unSaved, int64(len(fileIDs) - len(unSaved)), nil
+}
+
+func (d *AlbumDAO) DeleteFilesFromAlbum(ctx context.Context, db *gorm.DB, albumID string, fileIDs []string) (int64, error) {
+	result := db.WithContext(ctx).Model(&entity.AlbumFile{}).
+		Where("album_id = ?", albumID).
+		Where("file_id IN (?)", fileIDs).
+		Delete(&entity.AlbumFile{})
+	return result.RowsAffected, result.Error
+}
+
+// DeleteFilesFromAlbum delete a batch of files from album

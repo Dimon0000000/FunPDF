@@ -98,3 +98,16 @@ func isValidImageFormat(data []byte) bool {
 
 	return false
 }
+
+func checkDuplicateIDs(ids []string) []string {
+	validIDs := make([]string, 0, len(ids))
+	seen := make(map[string]any)
+
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			seen[id] = true
+			validIDs = append(validIDs, id)
+		}
+	}
+	return validIDs
+}

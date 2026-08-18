@@ -38,7 +38,7 @@ func (h *AlbumHandler) ListAlbums(c *gin.Context) {
 
 // CreateAlbum create an album
 func (h *AlbumHandler) CreateAlbum(c *gin.Context) {
-	var req *dto.CreateAlbumReq
+	var req *dto.CreateAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code": http.StatusBadRequest,
@@ -93,20 +93,144 @@ func (h *AlbumHandler) ListAlbumFiles(c *gin.Context) {
 
 // UpdateAlbum update the album
 func (h *AlbumHandler) UpdateAlbum(c *gin.Context) {
+	albumID := strings.TrimSpace(c.Param("album_id"))
+	if albumID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  "invalid album id",
+		})
+		return
+	}
 
+	var req *dto.UpdateAlbumRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	req.ID = albumID
+
+	err := h.albumSvr.UpdateAlbum(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"msg":  "success",
+	})
 }
 
 // DeleteAlbum delete the album
 func (h *AlbumHandler) DeleteAlbum(c *gin.Context) {
+	albumID := strings.TrimSpace(c.Param("album_id"))
+	if albumID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  "invalid album id",
+		})
+		return
+	}
 
+	err := h.albumSvr.DeleteAlbum(c.Request.Context(), albumID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"msg":  "success",
+	})
 }
 
-// UploadFiles upload a batch of files to album
-func (h *AlbumHandler) UploadFiles(c *gin.Context) {
+// UploadFilesToAlbum upload a batch of files to album
+func (h *AlbumHandler) UploadFilesToAlbum(c *gin.Context) {
+	albumID := strings.TrimSpace(c.Param("album_id"))
+	if albumID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  "invalid album id",
+		})
+		return
+	}
 
+	var req *dto.AlertAlbumFilesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	unSaved, err := h.albumSvr.UploadFilesToAlbum(c.Request.Context(), albumID, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	if len(unSaved) > 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"code": http.StatusOK,
+			"data": unSaved,
+			"msg":  "success",
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"msg":  "success",
+	})
 }
 
-// DeleteFiles delete a batch of files from album
-func (h *AlbumHandler) DeleteFiles(c *gin.Context) {
+// DeleteFilesFromAlbum delete a batch of files from album
+func (h *AlbumHandler) DeleteFilesFromAlbum(c *gin.Context) {
+	albumID := strings.TrimSpace(c.Param("album_id"))
+	if albumID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  "invalid album id",
+		})
+		return
+	}
 
+	var req *dto.AlertAlbumFilesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	err := h.albumSvr.DeleteFilesFromAlbum(c.Request.Context(), albumID, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"msg":  "success",
+	})
 }
+
+// HardDeleteFilesFromAlbum TODO: will be added in v0.2.x
+func (h *AlbumHandler) HardDeleteFilesFromAlbum(c *gin.Context) {}

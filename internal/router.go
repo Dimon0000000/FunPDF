@@ -41,8 +41,9 @@ func (r *Router) Setup(e *gin.Engine) {
 			album.PUT("/:album_id", r.albumHandler.UpdateAlbum)
 			album.DELETE("/:album_id", r.albumHandler.DeleteAlbum)
 
-			album.POST(":album_id/files", r.albumHandler.UploadFiles)
-			album.DELETE("/:album_id/files", r.albumHandler.DeleteFiles)
+			album.POST(":album_id/files", r.albumHandler.UploadFilesToAlbum)
+			album.DELETE("/:album_id/files", r.albumHandler.DeleteFilesFromAlbum)
+			// album.DELETE("/:album_id/files/delete", r.albumHandler.HardDeleteFilesFromAlbum) TODO: will be added in v0.2.x
 		}
 	}
 }
