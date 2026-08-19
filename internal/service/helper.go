@@ -43,12 +43,13 @@ func ValidateBase64ImageSize(base64Str string) error {
 	}
 
 	// remove data:image/png;base64 prefix
-	parts := strings.Split(base64Str, ".")
-	var imageData string
-	if len(parts) == 2 {
-		imageData = parts[1]
-	} else {
-		imageData = base64Str
+	imageData := base64Str
+	if strings.HasPrefix(base64Str, "data:") {
+		var found bool
+		_, imageData, found = strings.Cut(base64Str, ",")
+		if !found {
+			return fmt.Errorf("invalid image data URI")
+		}
 	}
 
 	// is image valid?
@@ -101,13 +102,14 @@ func isValidImageFormat(data []byte) bool {
 
 func checkDuplicateIDs(ids []string) []string {
 	validIDs := make([]string, 0, len(ids))
-	seen := make(map[string]any)
+	seen := make(map[string]struct{}, len(ids))
 
 	for _, id := range ids {
 		if _, ok := seen[id]; ok {
-			seen[id] = true
-			validIDs = append(validIDs, id)
+			continue
 		}
+		seen[id] = struct{}{}
+		validIDs = append(validIDs, id)
 	}
 	return validIDs
 }

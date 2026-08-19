@@ -38,7 +38,7 @@ func (h *AlbumHandler) ListAlbums(c *gin.Context) {
 
 // CreateAlbum create an album
 func (h *AlbumHandler) CreateAlbum(c *gin.Context) {
-	var req *dto.CreateAlbumRequest
+	var req dto.CreateAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code": http.StatusBadRequest,
@@ -48,7 +48,7 @@ func (h *AlbumHandler) CreateAlbum(c *gin.Context) {
 	}
 
 	// create the album
-	album, err := h.albumSvr.CreateAlbum(c.Request.Context(), req)
+	album, err := h.albumSvr.CreateAlbum(c.Request.Context(), &req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code": http.StatusInternalServerError,
@@ -102,7 +102,7 @@ func (h *AlbumHandler) UpdateAlbum(c *gin.Context) {
 		return
 	}
 
-	var req *dto.UpdateAlbumRequest
+	var req dto.UpdateAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code": http.StatusBadRequest,
@@ -113,7 +113,7 @@ func (h *AlbumHandler) UpdateAlbum(c *gin.Context) {
 
 	req.ID = albumID
 
-	err := h.albumSvr.UpdateAlbum(c.Request.Context(), req)
+	err := h.albumSvr.UpdateAlbum(c.Request.Context(), &req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code": http.StatusInternalServerError,
@@ -165,7 +165,7 @@ func (h *AlbumHandler) UploadFilesToAlbum(c *gin.Context) {
 		return
 	}
 
-	var req *dto.AlertAlbumFilesRequest
+	var req dto.AlertAlbumFilesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code": http.StatusBadRequest,
@@ -174,7 +174,7 @@ func (h *AlbumHandler) UploadFilesToAlbum(c *gin.Context) {
 		return
 	}
 
-	unSaved, err := h.albumSvr.UploadFilesToAlbum(c.Request.Context(), albumID, req)
+	unSaved, err := h.albumSvr.UploadFilesToAlbum(c.Request.Context(), albumID, &req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code": http.StatusInternalServerError,
@@ -189,6 +189,7 @@ func (h *AlbumHandler) UploadFilesToAlbum(c *gin.Context) {
 			"data": unSaved,
 			"msg":  "success",
 		})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -208,7 +209,7 @@ func (h *AlbumHandler) DeleteFilesFromAlbum(c *gin.Context) {
 		return
 	}
 
-	var req *dto.AlertAlbumFilesRequest
+	var req dto.AlertAlbumFilesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code": http.StatusBadRequest,
@@ -217,7 +218,7 @@ func (h *AlbumHandler) DeleteFilesFromAlbum(c *gin.Context) {
 		return
 	}
 
-	err := h.albumSvr.DeleteFilesFromAlbum(c.Request.Context(), albumID, req)
+	err := h.albumSvr.DeleteFilesFromAlbum(c.Request.Context(), albumID, &req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code": http.StatusInternalServerError,

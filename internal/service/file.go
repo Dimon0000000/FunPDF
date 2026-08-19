@@ -218,3 +218,12 @@ func (s *FileService) DeleteFile(ctx context.Context, fileID string) (int64, err
 	_ = os.RemoveAll(trashPath)
 	return affected, nil
 }
+
+// ListFileAlbums get file's album
+func (s *FileService) ListFileAlbums(ctx context.Context, fileID string) ([]entity.Album, error) {
+	albums, err := s.fileDAO.ListFileAlbums(ctx, dao.DB, fileID)
+	if err != nil {
+		return nil, err
+	}
+	return albums, nil
+}

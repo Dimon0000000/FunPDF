@@ -1,4 +1,6 @@
 export interface BaseModel {
+  created_at?: string
+  updated_at?: string
   create_time?: number
   create_date?: string
   update_time?: number
@@ -8,17 +10,8 @@ export interface BaseModel {
 export interface Album extends BaseModel {
   id: string
   name: string
-  avatar: string
+  thumbnail: string
   description: string
-  files?: AlbumFile[]
-}
-
-export interface AlbumFile extends BaseModel {
-  id: string
-  name: string
-  album_id?: string
-  sort_order?: number
-  description?: string
 }
 
 export interface Provider extends BaseModel {

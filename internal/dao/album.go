@@ -4,6 +4,7 @@ import (
 	"FunPDF/internal/dto"
 	"FunPDF/internal/entity"
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -36,8 +37,12 @@ func (d *AlbumDAO) CreateAlbum(ctx context.Context, db *gorm.DB, album *entity.A
 // ListAlbumFiles list all files under the album
 func (d *AlbumDAO) ListAlbumFiles(ctx context.Context, db *gorm.DB, albumID string) ([]*entity.File, error) {
 	var files []*entity.File
-	err := db.WithContext(ctx).Model(&entity.AlbumFile{}).
-		Where("album_id = ?", albumID).Find(&files).Error
+	err := db.WithContext(ctx).Table("files").
+		Select("files.*").
+		Joins("INNER JOIN album_files ON album_files.file_id = files.id").
+		Where("album_files.album_id = ?", albumID).
+		Distinct().
+		Find(&files).Error
 	if err != nil {
 		return nil, err
 	}
@@ -56,12 +61,33 @@ func (d *AlbumDAO) UpdateAlbum(ctx context.Context, db *gorm.DB, req *dto.Update
 	return result.RowsAffected, result.Error
 }
 
-// DeleteAlbum delete the album
-func (d *AlbumDAO) DeleteAlbum(ctx context.Context, db *gorm.DB, albumID string) (int64, error) {
-	result := db.WithContext(ctx).Model(&entity.AlbumFile{}).
-		Where("album_id = ?", albumID).
-		Delete(&entity.AlbumFile{})
-	return result.RowsAffected, result.Error
+// DeleteAlbum delete the album(delete album not have influence on normal files)
+func (d *AlbumDAO) DeleteAlbum(ctx context.Context, db *gorm.DB, albumID string) error {
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var album entity.Album
+		if err := tx.Where("id = ?", albumID).First(&album).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("album not found")
+			}
+			return err
+		}
+
+		err := tx.Where("album_id = ?", albumID).
+			Delete(&entity.AlbumFile{}).Error
+		if err != nil {
+			return err
+		}
+
+		err = tx.Delete(&entity.Album{}, "id = ?", albumID).Error
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // UploadFilesToAlbum upload a batch of files to album

@@ -1,55 +1,46 @@
 import { http, unwrapApiResponse } from './http'
-import type { Album, AlbumFile } from './types'
+import type { CachedFile } from './files'
+import type { Album } from './types'
 
 export interface CreateAlbumRequest {
   name: string
-  avatar?: string
+  thumbnail: string
   description?: string
 }
 
-export type UpdateAlbumRequest = Partial<CreateAlbumRequest>
-
-export interface AddAlbumFileRequest {
-  file_id: string
-  name?: string
-  sort_order?: number
-  description?: string
-}
-
-export type UpdateAlbumFileRequest = Partial<Omit<AddAlbumFileRequest, 'file_id'>>
+export interface UpdateAlbumRequest extends CreateAlbumRequest {}
 
 export async function createAlbum(payload: CreateAlbumRequest) {
-  const response = await http.post<Album | { code: number; data: Album }>('/albums', payload)
+  const response = await http.post<Album | { code: number; data: Album }>('/album', payload)
   return unwrapApiResponse<Album>(response.data)
 }
 
-export async function getAlbum(albumId: string) {
-  const response = await http.get<Album | { code: number; data: Album }>(`/albums/${encodeURIComponent(albumId)}`)
-  return unwrapApiResponse<Album>(response.data)
+export async function listAlbums() {
+  const response = await http.get<Album[] | { code: number; data: Album[] }>('/album')
+  return unwrapApiResponse<Album[]>(response.data)
+}
+
+export async function listAlbumFiles(albumId: string) {
+  const response = await http.get<CachedFile[] | { code: number; data: CachedFile[] }>(`/album/${encodeURIComponent(albumId)}`)
+  return unwrapApiResponse<CachedFile[]>(response.data)
 }
 
 export async function updateAlbum(albumId: string, payload: UpdateAlbumRequest) {
-  const response = await http.patch<Album | { code: number; data: Album }>(`/albums/${encodeURIComponent(albumId)}`, payload)
-  return unwrapApiResponse<Album>(response.data)
+  await http.put(`/album/${encodeURIComponent(albumId)}`, payload)
 }
 
 export async function deleteAlbum(albumId: string) {
-  await http.delete(`/albums/${encodeURIComponent(albumId)}`)
+  await http.delete(`/album/${encodeURIComponent(albumId)}`)
 }
 
-export async function addFileToAlbum(albumId: string, payload: AddAlbumFileRequest) {
-  const response = await http.post<AlbumFile | { code: number; data: AlbumFile }>(`/albums/${encodeURIComponent(albumId)}/files`, payload)
-  return unwrapApiResponse<AlbumFile>(response.data)
-}
-
-export async function updateAlbumFile(albumId: string, fileId: string, payload: UpdateAlbumFileRequest) {
-  const response = await http.patch<AlbumFile | { code: number; data: AlbumFile }>(
-    `/albums/${encodeURIComponent(albumId)}/files/${encodeURIComponent(fileId)}`,
-    payload,
+export async function addFilesToAlbum(albumId: string, ids: string[]) {
+  const response = await http.post<{ code: number; data?: Record<string, string> }>(
+    `/album/${encodeURIComponent(albumId)}/files`,
+    { ids },
   )
-  return unwrapApiResponse<AlbumFile>(response.data)
+  return response.data.data ?? {}
 }
 
-export async function removeFileFromAlbum(albumId: string, fileId: string) {
-  await http.delete(`/albums/${encodeURIComponent(albumId)}/files/${encodeURIComponent(fileId)}`)
+export async function removeFilesFromAlbum(albumId: string, ids: string[]) {
+  await http.delete(`/album/${encodeURIComponent(albumId)}/files`, { data: { ids } })
 }

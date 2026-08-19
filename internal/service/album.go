@@ -81,8 +81,8 @@ func (s *AlbumService) UpdateAlbum(ctx context.Context, req *dto.UpdateAlbumRequ
 
 // DeleteAlbum delete the album
 func (s *AlbumService) DeleteAlbum(ctx context.Context, albumID string) error {
-	affected, err := s.albumDAO.DeleteAlbum(ctx, dao.DB, albumID)
-	if err != nil || affected == 0 {
+	err := s.albumDAO.DeleteAlbum(ctx, dao.DB, albumID)
+	if err != nil {
 		return fmt.Errorf("delete album failed: %w", err)
 	}
 	return nil

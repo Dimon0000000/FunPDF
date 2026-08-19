@@ -27,9 +27,10 @@ func (r *Router) Setup(e *gin.Engine) {
 		{
 			file.GET("", r.fileHandler.ListFiles)
 			file.POST("", r.fileHandler.UploadFile)
-			file.PUT("/:file_id", r.fileHandler.AlertFile) // TODO finish this API
+			//file.PUT("/:file_id", r.fileHandler.AlertFile) // TODO finish this API
 			file.DELETE("/:file_id", r.fileHandler.DeleteFile)
 			file.PATCH("/:file_id/state", r.fileHandler.SaveFile)
+			file.GET("/:file_id/album", r.fileHandler.ListFileAlbums)
 		}
 
 		album := api.Group("/album")
@@ -41,7 +42,7 @@ func (r *Router) Setup(e *gin.Engine) {
 			album.PUT("/:album_id", r.albumHandler.UpdateAlbum)
 			album.DELETE("/:album_id", r.albumHandler.DeleteAlbum)
 
-			album.POST(":album_id/files", r.albumHandler.UploadFilesToAlbum)
+			album.POST("/:album_id/files", r.albumHandler.UploadFilesToAlbum)
 			album.DELETE("/:album_id/files", r.albumHandler.DeleteFilesFromAlbum)
 			// album.DELETE("/:album_id/files/delete", r.albumHandler.HardDeleteFilesFromAlbum) TODO: will be added in v0.2.x
 		}
