@@ -78,6 +78,11 @@ func (d *FileDAO) DeleteFile(ctx context.Context, fileID string, db *gorm.DB) (i
 	var affected int64
 
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("file_id = ?", fileID).
+			Delete(&entity.AlbumFile{}).Error; err != nil {
+			return err
+		}
+
 		result := tx.Model(&entity.File{}).
 			Where("id = ?", fileID).
 			Delete(&entity.File{})
@@ -86,4 +91,19 @@ func (d *FileDAO) DeleteFile(ctx context.Context, fileID string, db *gorm.DB) (i
 	})
 
 	return affected, err
+}
+
+// ListFileAlbums get file's album
+func (d *FileDAO) ListFileAlbums(ctx context.Context, db *gorm.DB, fileID string) ([]entity.Album, error) {
+	albums := make([]entity.Album, 0)
+	err := db.WithContext(ctx).Table("albums").
+		Select("albums.*").
+		Joins("INNER JOIN album_files ON album_files.album_id = albums.id").
+		Where("album_files.file_id = ?", fileID).
+		Distinct().
+		Find(&albums).Error
+	if err != nil {
+		return nil, err
+	}
+	return albums, nil
 }

@@ -1,5 +1,6 @@
 import { http, unwrapApiResponse } from './http'
 import type { FunPdfEditorState } from '@/types/project'
+import type { Album } from './types'
 
 export interface CachedFile {
   id: string
@@ -17,6 +18,22 @@ export interface SaveEditorStateResult {
   file_id: string
   revision: number
   saved_at: string
+}
+
+export async function listFiles() {
+  const response = await http.get<CachedFile[] | { code: number; data: CachedFile[] }>('/files')
+  return unwrapApiResponse<CachedFile[]>(response.data)
+}
+
+export async function deleteFile(fileId: string) {
+  await http.delete(`/files/${encodeURIComponent(fileId)}`)
+}
+
+export async function listFileAlbums(fileId: string) {
+  const response = await http.get<Album[] | { code: number; data: Album[] }>(
+    `/files/${encodeURIComponent(fileId)}/album`,
+  )
+  return unwrapApiResponse<Album[]>(response.data)
 }
 
 /** First Ctrl+S: send the immutable source PDF and the initial editable state. */

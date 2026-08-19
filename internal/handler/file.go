@@ -97,6 +97,12 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"code": http.StatusCreated, "msg": "success", "data": file})
 }
 
+// AlertFile update the file metadata
+func (h *FileHandler) AlertFile(c *gin.Context) {
+
+}
+
+// DeleteFile delete the file
 func (h *FileHandler) DeleteFile(c *gin.Context) {
 	fileID := strings.TrimSpace(c.Param("file_id"))
 	if fileID == "" {
@@ -113,4 +119,31 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// ListFileAlbums get file's album
+func (h *FileHandler) ListFileAlbums(c *gin.Context) {
+	fileID := strings.TrimSpace(c.Param("file_id"))
+	if fileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  "file id is empty",
+		})
+		return
+	}
+
+	albums, err := h.fileSvr.ListFileAlbums(c.Request.Context(), fileID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"data": albums,
+		"msg":  "success",
+	})
 }
