@@ -35,7 +35,8 @@ const error = ref('')
 const notice = ref('')
 const showFilePicker = ref(false)
 const editingAlbum = ref(false)
-const albumDraft = ref({ name: '', description: '' })
+const albumDraft = ref({ name: '', description: '', thumbnail: '' })
+const albumThumbnailName = ref('')
 const expandedFileId = ref('')
 const fileNameDrafts = ref<Record<string, string>>({})
 const thumbnailFailures = ref<Record<string, boolean>>({})
@@ -124,6 +125,26 @@ async function readImage(file?: File) {
   createThumbnailName.value = file.name
 }
 
+async function readAlbumImage(file?: File) {
+  if (!file) return
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) {
+    error.value = '璇烽€夋嫨 PNG銆丣PEG銆丟IF 鎴?WebP 鍥剧墖'
+    return
+  }
+  if (file.size > 4 * 1024 * 1024) {
+    error.value = '灏侀潰鍥剧墖涓嶈兘瓒呰繃 4 MB'
+    return
+  }
+  error.value = ''
+  albumDraft.value.thumbnail = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+  albumThumbnailName.value = file.name
+}
+
 async function loadAll() {
   loading.value = true
   clearFeedback()
@@ -147,7 +168,8 @@ async function loadAll() {
 
 async function openAlbum(album: Album) {
   selectedAlbum.value = { ...album }
-  albumDraft.value = { name: album.name, description: album.description }
+  albumDraft.value = { name: album.name, description: album.description, thumbnail: album.thumbnail }
+  albumThumbnailName.value = ''
   editingAlbum.value = false
   expandedFileId.value = ''
   albumFiles.value = []
@@ -179,7 +201,9 @@ function startAlbumEdit() {
   albumDraft.value = {
     name: selectedAlbum.value.name,
     description: selectedAlbum.value.description,
+    thumbnail: selectedAlbum.value.thumbnail,
   }
+  albumThumbnailName.value = ''
   editingAlbum.value = true
 }
 
@@ -189,8 +213,10 @@ function cancelAlbumEdit() {
     albumDraft.value = {
       name: selectedAlbum.value.name,
       description: selectedAlbum.value.description,
+      thumbnail: selectedAlbum.value.thumbnail,
     }
   }
+  albumThumbnailName.value = ''
 }
 
 function openCreate() {
@@ -239,7 +265,7 @@ async function saveAlbum() {
     const payload = {
       name: albumDraft.value.name.trim(),
       description: albumDraft.value.description.trim(),
-      thumbnail: selectedAlbum.value.thumbnail,
+      thumbnail: albumDraft.value.thumbnail || generatedThumbnail(albumDraft.value.name.trim()),
     }
     await updateAlbum(selectedAlbum.value.id, payload)
     selectedAlbum.value = { ...selectedAlbum.value, ...payload }
@@ -462,6 +488,15 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="!editingAlbum" class="album-description">{{ selectedAlbum.description || '暂无描述' }}</p>
         <div v-else class="album-editor">
+          <label class="cover-field">合集封面</label>
+          <label class="cover-picker">
+            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" @change="readAlbumImage(($event.target as HTMLInputElement).files?.[0])" />
+            <span class="cover-preview">
+              <img v-if="albumDraft.thumbnail" :src="albumDraft.thumbnail" alt="封面预览" />
+              <template v-else><i class="fa-regular fa-image"></i><small>未选择时自动生成</small></template>
+            </span>
+            <span class="cover-copy"><strong>{{ albumThumbnailName || '更换合集封面' }}</strong><small>PNG / JPEG / GIF / WebP，最大 4 MB</small></span>
+          </label>
           <label>名称<input v-model="albumDraft.name" maxlength="80" /></label>
           <label>描述<textarea v-model="albumDraft.description" rows="2" maxlength="500"></textarea></label>
           <div class="button-row">

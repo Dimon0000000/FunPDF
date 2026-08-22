@@ -21,6 +21,22 @@ function selectItem(id: string) {
   if (store.activeSidebar === id && store.sidebarOpen) store.setSidebarOpen(false)
   else store.setActiveSidebar(id)
 }
+
+function handleSidebarWheel(event: WheelEvent) {
+  const target = event.target as HTMLElement | null
+  const content = target?.closest('.panel-content') as HTMLElement | null
+  if (!content) return
+
+  const maxScroll = content.scrollHeight - content.clientHeight
+  if (maxScroll <= 0) return
+
+  const nextTop = Math.min(Math.max(content.scrollTop + event.deltaY, 0), maxScroll)
+  if (nextTop === content.scrollTop) return
+
+  event.preventDefault()
+  event.stopPropagation()
+  content.scrollTop = nextTop
+}
 </script>
 
 <template>
@@ -45,7 +61,7 @@ function selectItem(id: string) {
     </nav>
 
     <transition name="sidebar">
-      <section v-if="store.sidebarOpen" class="sidebar-panel">
+      <section v-if="store.sidebarOpen" class="sidebar-panel" @wheel="handleSidebarWheel">
         <div class="panel-header">
           <div>
             <div class="panel-title">{{ items.find(item => item.id === store.activeSidebar)?.label }}</div>
@@ -117,7 +133,7 @@ function selectItem(id: string) {
 </template>
 
 <style scoped>
-.sidebar-shell { height: 100%; display: flex; background: #f6f6f6; border-right: 1px solid #dedede; position: relative; z-index: 10; }
+.sidebar-shell { height: 100%; min-height: 0; display: flex; background: #f6f6f6; border-right: 1px solid #dedede; position: relative; z-index: 10; }
 .rail { width: 48px; flex: 0 0 48px; display: flex; flex-direction: column; align-items: center; padding-top: 50px; gap: 4px; background: #f3f3f3; }
 .rail-button, .rail-brand, .close-button { border: 0; background: transparent; color: #62676d; cursor: pointer; }
 .rail-brand { position: absolute; left: 6px; top: 8px; width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; padding: 4px; z-index: 1; }
@@ -128,13 +144,17 @@ function selectItem(id: string) {
 .rail-button.active { background: #dedede; color: #262a2f; }
 .rail-button.active::before { content: ''; position: absolute; left: -6px; top: 8px; width: 3px; height: 20px; border-radius: 4px; background: #5f6873; }
 .count-badge { position: absolute; right: -3px; top: -2px; min-width: 16px; height: 16px; padding: 0 3px; display: grid; place-items: center; border-radius: 8px; background: #555b62; color: white; font-size: 9px; }
-.sidebar-panel { width: 260px; background: #fafafa; display: flex; flex-direction: column; border-left: 1px solid #ececec; overflow: hidden; }
+.sidebar-panel { width: 260px; height: 100%; min-height: 0; background: #fafafa; display: flex; flex-direction: column; border-left: 1px solid #ececec; overflow: hidden; }
 .panel-header { height: 60px; flex: 0 0 60px; padding: 0 14px 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e5e9ee; }
 .panel-title { font-size: 14px; font-weight: 700; color: #30343a; }
 .panel-subtitle { width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font-size: 11px; color: #94a3b8; }
 .close-button { width: 30px; height: 30px; border-radius: 6px; }
 .close-button:hover { background: #e9eef3; }
-.panel-content { min-height: 0; padding: 12px; overflow: auto; }
+.panel-content { flex: 1 1 auto; min-height: 0; padding: 12px; overflow: auto; }
+.panel-content::-webkit-scrollbar-thumb { background: transparent; }
+.panel-content:hover::-webkit-scrollbar-thumb { background: #c5c5c5; }
+.panel-content { scrollbar-color: transparent transparent; }
+.panel-content:hover { scrollbar-color: #c5c5c5 transparent; }
 .empty { padding: 18px 12px; font-size: 13px; line-height: 1.7; color: #8491a3; text-align: center; }
 .page-item { width: 100%; border: 0; background: transparent; border-radius: 8px; padding: 8px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: #64686e; text-align: left; }
 .page-item:hover, .page-item.active { background: #e9eef5; }

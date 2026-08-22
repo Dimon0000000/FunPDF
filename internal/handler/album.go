@@ -57,8 +57,8 @@ func (h *AlbumHandler) CreateAlbum(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": http.StatusOK,
+	c.JSON(http.StatusCreated, gin.H{
+		"code": http.StatusCreated,
 		"data": album,
 		"msg":  "success",
 	})
@@ -148,10 +148,7 @@ func (h *AlbumHandler) DeleteAlbum(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": http.StatusOK,
-		"msg":  "success",
-	})
+	c.Status(http.StatusNoContent)
 }
 
 // UploadFilesToAlbum upload a batch of files to album
@@ -227,10 +224,7 @@ func (h *AlbumHandler) DeleteFilesFromAlbum(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": http.StatusOK,
-		"msg":  "success",
-	})
+	c.Status(http.StatusNoContent)
 }
 
 // HardDeleteFilesFromAlbum TODO: will be added in v0.2.x
