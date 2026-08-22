@@ -5,6 +5,7 @@ import type { ToolItem, ToolType } from '@/types/pdf'
 
 const emit = defineEmits<{
   openFile: []
+  closeFile: []
   fitWidth: []
   rotate: []
   undo: []
@@ -46,8 +47,7 @@ function chooseTool(tool: ToolType) {
       </button>
 
       <button class="brand-button" title="FunPDF">
-        <span class="brand-mark">F</span>
-        <span class="brand-name">FunPDF</span>
+        <img src="/FunPDF-Banner.png" alt="FunPDF" class="brand-banner-img" />
       </button>
 
       <div class="divider"></div>
@@ -126,6 +126,9 @@ function chooseTool(tool: ToolType) {
       <span v-if="store.documentName" class="document-name" :title="store.documentName">
         {{ store.dirty ? '● ' : '' }}{{ store.documentName }}
       </span>
+      <button class="icon-button" :disabled="!hasDocument" title="关闭文件并更新缩略图" @click="emit('closeFile')">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
       <button class="icon-button" :disabled="!hasDocument" title="保存可编辑工程（Ctrl+S）" @click="emit('saveProject')">
         <i class="fa-regular fa-floppy-disk"></i>
       </button>
@@ -204,8 +207,8 @@ button:disabled { opacity: 0.35; cursor: default; }
   gap: 8px;
 }
 
-.brand-button { display: flex; align-items: center; gap: 8px; border-radius: 7px; padding: 5px 8px; }
-.brand-mark { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 7px; background: #41464d; color: white; font-weight: 750; font-size: 14px; }
+.brand-button { height: 36px; display: flex; align-items: center; border-radius: 7px; padding: 4px 8px; }
+.brand-banner-img { width: 112px; height: 27px; display: block; object-fit: contain; }
 .brand-name { font-weight: 700; color: #262a2f; letter-spacing: -0.2px; }
 .divider { width: 1px; height: 24px; background: #dadada; margin: 0 4px; }
 .compact-divider { margin-left: 2px; }

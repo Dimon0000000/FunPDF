@@ -9,7 +9,13 @@ import {
   removeFilesFromAlbum,
   updateAlbum,
 } from '@/api/albums'
-import { deleteFile, listFileAlbums, listFiles, type CachedFile } from '@/api/files'
+import {
+  deleteFile,
+  listFileAlbums,
+  listFiles,
+  updateFile,
+  type CachedFile,
+} from '@/api/files'
 import { apiErrorMessage } from '@/api/http'
 import type { Album } from '@/api/types'
 
@@ -28,6 +34,11 @@ const actionBusy = ref(false)
 const error = ref('')
 const notice = ref('')
 const showFilePicker = ref(false)
+const editingAlbum = ref(false)
+const albumDraft = ref({ name: '', description: '' })
+const expandedFileId = ref('')
+const fileNameDrafts = ref<Record<string, string>>({})
+const thumbnailFailures = ref<Record<string, boolean>>({})
 
 const createOpen = ref(false)
 const createName = ref('')
@@ -120,6 +131,7 @@ async function loadAll() {
     const [nextAlbums, nextFiles] = await Promise.all([listAlbums(), listFiles()])
     albums.value = nextAlbums ?? []
     libraryFiles.value = nextFiles ?? []
+    thumbnailFailures.value = {}
     await loadMemberships(libraryFiles.value)
     if (selectedAlbum.value) {
       selectedAlbum.value = albums.value.find(album => album.id === selectedAlbum.value?.id) ?? null
@@ -135,6 +147,9 @@ async function loadAll() {
 
 async function openAlbum(album: Album) {
   selectedAlbum.value = { ...album }
+  albumDraft.value = { name: album.name, description: album.description }
+  editingAlbum.value = false
+  expandedFileId.value = ''
   albumFiles.value = []
   selectedFileIds.value = []
   showFilePicker.value = false
@@ -154,7 +169,28 @@ function closeAlbum() {
   albumFiles.value = []
   showFilePicker.value = false
   selectedFileIds.value = []
+  editingAlbum.value = false
+  expandedFileId.value = ''
   clearFeedback()
+}
+
+function startAlbumEdit() {
+  if (!selectedAlbum.value) return
+  albumDraft.value = {
+    name: selectedAlbum.value.name,
+    description: selectedAlbum.value.description,
+  }
+  editingAlbum.value = true
+}
+
+function cancelAlbumEdit() {
+  editingAlbum.value = false
+  if (selectedAlbum.value) {
+    albumDraft.value = {
+      name: selectedAlbum.value.name,
+      description: selectedAlbum.value.description,
+    }
+  }
 }
 
 function openCreate() {
@@ -196,25 +232,61 @@ async function submitCreate() {
 }
 
 async function saveAlbum() {
-  if (!selectedAlbum.value || !selectedAlbum.value.name.trim()) return
+  if (!selectedAlbum.value || !albumDraft.value.name.trim()) return
   actionBusy.value = true
   clearFeedback()
   try {
     const payload = {
-      name: selectedAlbum.value.name.trim(),
-      description: selectedAlbum.value.description.trim(),
+      name: albumDraft.value.name.trim(),
+      description: albumDraft.value.description.trim(),
       thumbnail: selectedAlbum.value.thumbnail,
     }
     await updateAlbum(selectedAlbum.value.id, payload)
     selectedAlbum.value = { ...selectedAlbum.value, ...payload }
     const index = albums.value.findIndex(album => album.id === selectedAlbum.value?.id)
     if (index >= 0) albums.value[index] = { ...selectedAlbum.value }
+    editingAlbum.value = false
     notice.value = '合集信息已保存'
   } catch (requestError) {
     error.value = apiErrorMessage(requestError, '保存合集失败')
   } finally {
     actionBusy.value = false
   }
+}
+
+function openStoredFile(file: CachedFile) {
+  window.dispatchEvent(new CustomEvent('funpdf:open-cached-file', { detail: { file } }))
+}
+
+function toggleFileActions(file: CachedFile) {
+  expandedFileId.value = expandedFileId.value === file.id ? '' : file.id
+  fileNameDrafts.value[file.id] = file.name
+}
+
+async function saveFileName(file: CachedFile) {
+  const name = fileNameDrafts.value[file.id]?.trim()
+  if (!name || name === file.name) {
+    expandedFileId.value = ''
+    return
+  }
+  actionBusy.value = true
+  clearFeedback()
+  try {
+    await updateFile(file.id, { name, mime_type: file.mime_type })
+    const applyName = (item: CachedFile) => item.id === file.id ? { ...item, name } : item
+    libraryFiles.value = libraryFiles.value.map(applyName)
+    albumFiles.value = albumFiles.value.map(applyName)
+    expandedFileId.value = ''
+    notice.value = '文件名称已更新'
+  } catch (requestError) {
+    error.value = apiErrorMessage(requestError, '更新文件失败')
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+function markThumbnailFailed(fileId: string) {
+  thumbnailFailures.value[fileId] = true
 }
 
 async function removeAlbum() {
@@ -383,13 +455,22 @@ onBeforeUnmount(() => {
         <button class="back-button" @click="closeAlbum"><i class="fa-solid fa-arrow-left"></i>返回合集</button>
         <div class="selected-header">
           <span class="selected-cover"><img :src="selectedAlbum.thumbnail" alt="" /></span>
-          <div><strong>{{ selectedAlbum.name }}</strong><small>{{ albumFiles.length }} 个文件</small></div>
+          <div class="selected-copy"><strong>{{ selectedAlbum.name }}</strong><small>{{ albumFiles.length }} 个文件</small></div>
+          <button v-if="!editingAlbum" class="edit-album-button" title="编辑合集信息" @click="startAlbumEdit">
+            <i class="fa-regular fa-pen-to-square"></i>
+          </button>
         </div>
-        <label>名称<input v-model="selectedAlbum.name" maxlength="80" /></label>
-        <label>描述<textarea v-model="selectedAlbum.description" rows="2" maxlength="500"></textarea></label>
-        <div class="button-row">
-          <button class="primary" :disabled="actionBusy || !selectedAlbum.name.trim()" @click="saveAlbum">保存信息</button>
-          <button class="danger" :disabled="actionBusy" title="只删除合集，不删除公共文件" @click="removeAlbum">删除合集</button>
+        <p v-if="!editingAlbum" class="album-description">{{ selectedAlbum.description || '暂无描述' }}</p>
+        <div v-else class="album-editor">
+          <label>名称<input v-model="albumDraft.name" maxlength="80" /></label>
+          <label>描述<textarea v-model="albumDraft.description" rows="2" maxlength="500"></textarea></label>
+          <div class="button-row">
+            <button class="secondary" :disabled="actionBusy" @click="cancelAlbumEdit">取消</button>
+            <button class="primary" :disabled="actionBusy || !albumDraft.name.trim()" @click="saveAlbum">保存</button>
+          </div>
+          <button class="delete-album-link" :disabled="actionBusy" title="只删除合集，不删除公共文件" @click="removeAlbum">
+            <i class="fa-regular fa-trash-can"></i>删除合集
+          </button>
         </div>
 
         <div class="section-heading files-heading">
@@ -408,10 +489,29 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-for="file in albumFiles" :key="file.id" class="file-row">
-          <span class="file-icon"><i class="fa-regular fa-file-pdf"></i></span>
-          <span class="file-copy"><strong>{{ file.name }}</strong><small>{{ formatSize(file.size) }}</small></span>
-          <button title="仅从此合集中移除" :disabled="actionBusy" @click="detachFile(file)"><i class="fa-solid fa-link-slash"></i></button>
+        <div v-for="file in albumFiles" :key="file.id" class="compact-file-card" :class="{ expanded: expandedFileId === file.id }">
+          <div class="file-row">
+            <button class="file-open" :title="`打开 ${file.name}`" @click="openStoredFile(file)">
+              <span class="file-thumbnail">
+                <img v-if="file.thumbnail && !thumbnailFailures[file.id]" :src="file.thumbnail" alt="PDF 第一页" @error="markThumbnailFailed(file.id)" />
+                <i v-else class="fa-regular fa-file-pdf"></i>
+              </span>
+              <span class="file-copy"><strong>{{ file.name }}</strong><small>{{ formatSize(file.size) }}</small></span>
+            </button>
+            <button class="file-menu" :aria-expanded="expandedFileId === file.id" title="文件操作" @click.stop="toggleFileActions(file)">
+              <i :class="expandedFileId === file.id ? 'fa-solid fa-chevron-up' : 'fa-solid fa-ellipsis' "></i>
+            </button>
+          </div>
+          <Transition name="expand">
+            <div v-if="expandedFileId === file.id" class="file-actions">
+              <label>文件名<input v-model="fileNameDrafts[file.id]" maxlength="255" @keyup.enter="saveFileName(file)" /></label>
+              <div class="file-action-buttons">
+                <button @click="openStoredFile(file)"><i class="fa-regular fa-folder-open"></i>打开</button>
+                <button class="primary" :disabled="actionBusy || !fileNameDrafts[file.id]?.trim()" @click="saveFileName(file)"><i class="fa-regular fa-floppy-disk"></i>保存</button>
+                <button class="unlink" :disabled="actionBusy" title="文件仍会保留在公共文件区" @click="detachFile(file)"><i class="fa-solid fa-link-slash"></i>移出</button>
+              </div>
+            </div>
+          </Transition>
         </div>
         <div v-if="!loading && albumFiles.length === 0" class="mini-empty">此合集暂无文件</div>
       </template>
@@ -424,17 +524,34 @@ onBeforeUnmount(() => {
       </div>
       <div v-for="file in libraryFiles" :key="file.id" class="library-card">
         <div class="library-file">
-          <span class="file-icon"><i class="fa-regular fa-file-pdf"></i></span>
-          <span class="file-copy"><strong>{{ file.name }}</strong><small>{{ formatSize(file.size) }} · v{{ file.revision }}</small></span>
-          <button class="delete-file" title="永久删除文件" :disabled="actionBusy" @click="permanentlyDelete(file)"><i class="fa-regular fa-trash-can"></i></button>
+          <button class="file-open" :title="`打开 ${file.name}`" @click="openStoredFile(file)">
+            <span class="file-thumbnail">
+              <img v-if="file.thumbnail && !thumbnailFailures[file.id]" :src="file.thumbnail" alt="PDF 第一页" @error="markThumbnailFailed(file.id)" />
+              <i v-else class="fa-regular fa-file-pdf"></i>
+            </span>
+            <span class="file-copy"><strong>{{ file.name }}</strong><small>{{ formatSize(file.size) }} · {{ membershipSummary(file.id) }}</small></span>
+          </button>
+          <button class="file-menu" :aria-expanded="expandedFileId === file.id" title="展开文件操作" @click.stop="toggleFileActions(file)">
+            <i :class="expandedFileId === file.id ? 'fa-solid fa-chevron-up' : 'fa-solid fa-ellipsis' "></i>
+          </button>
         </div>
-        <div class="assign-row">
-          <select v-model="assignmentTargets[file.id]" :title="membershipSummary(file.id)" aria-label="查看所属合集或选择新的合集">
-            <option value="">{{ membershipSummary(file.id) }}</option>
-            <option v-for="album in assignableAlbums(file.id)" :key="album.id" :value="album.id">加入：{{ album.name }}</option>
-          </select>
-          <button :disabled="actionBusy || !assignmentTargets[file.id]" title="加入所选合集" @click="assignFile(file)"><i class="fa-solid fa-arrow-right"></i></button>
-        </div>
+        <Transition name="expand">
+          <div v-if="expandedFileId === file.id" class="file-actions library-actions">
+            <label>文件名<input v-model="fileNameDrafts[file.id]" maxlength="255" @keyup.enter="saveFileName(file)" /></label>
+            <div class="assign-row">
+              <select v-model="assignmentTargets[file.id]" :title="membershipSummary(file.id)" aria-label="查看所属合集或选择新的合集">
+                <option value="">{{ membershipSummary(file.id) }}</option>
+                <option v-for="album in assignableAlbums(file.id)" :key="album.id" :value="album.id">加入：{{ album.name }}</option>
+              </select>
+              <button :disabled="actionBusy || !assignmentTargets[file.id]" title="加入所选合集" @click="assignFile(file)"><i class="fa-solid fa-arrow-right"></i></button>
+            </div>
+            <div class="file-action-buttons">
+              <button @click="openStoredFile(file)"><i class="fa-regular fa-folder-open"></i>打开</button>
+              <button class="primary" :disabled="actionBusy || !fileNameDrafts[file.id]?.trim()" @click="saveFileName(file)"><i class="fa-regular fa-floppy-disk"></i>保存</button>
+              <button class="delete-file" :disabled="actionBusy" @click="permanentlyDelete(file)"><i class="fa-regular fa-trash-can"></i>删除</button>
+            </div>
+          </div>
+        </Transition>
       </div>
       <div v-if="!loading && libraryFiles.length === 0" class="empty-state">
         <i class="fa-solid fa-box-open"></i>
@@ -501,19 +618,22 @@ button:disabled { opacity: .45; cursor: default; }
 .empty-state { min-height: 170px; padding: 22px 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #92979c; text-align: center; }
 .empty-state > i { margin-bottom: 12px; font-size: 28px; color: #b1b5b9; }.empty-state strong { color: #565c62; font-size: 12px; }.empty-state span { margin: 5px 0 14px; font-size: 10px; }.empty-state button { min-height: 31px; padding: 0 12px; font-size: 10px; }
 .back-button { align-self: flex-start; padding: 6px 8px; background: transparent; color: #6c7278; font-size: 10px; }.back-button i { margin-right: 6px; }
-.selected-header { padding: 3px 0 6px; display: flex; align-items: center; gap: 10px; }.selected-cover { width: 48px; height: 48px; flex: 0 0 48px; border-radius: 9px; }.selected-header strong, .selected-header small { display: block; }.selected-header strong { font-size: 13px; }.selected-header small { margin-top: 4px; color: #92979c; font-size: 10px; }
+.selected-header { padding: 3px 0 6px; display: flex; align-items: center; gap: 10px; }.selected-cover { width: 48px; height: 48px; flex: 0 0 48px; border-radius: 9px; }.selected-copy { min-width: 0; flex: 1; }.selected-header strong, .selected-header small { display: block; }.selected-header strong { overflow: hidden; color: #353a3f; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }.selected-header small { margin-top: 4px; color: #92979c; font-size: 10px; }.edit-album-button { width: 32px; height: 32px; flex: 0 0 32px; background: transparent; color: #66717c; font-size: 14px; }
+.album-description { margin: 0; padding: 9px 10px; border-left: 2px solid #d9dcdf; color: #73797f; font-size: 10px; line-height: 1.6; white-space: pre-wrap; }.album-editor { display: grid; gap: 8px; padding: 9px; border: 1px solid #e1e2e3; border-radius: 9px; background: #f5f5f5; }.delete-album-link { justify-self: start; padding: 5px 3px; background: transparent; color: #a14a4a; font-size: 9px; }.delete-album-link i { margin-right: 5px; }
 label { display: grid; gap: 4px; color: #777c81; font-size: 10px; }
 input, textarea, select { width: 100%; border: 1px solid #d8dadd; border-radius: 7px; padding: 8px; background: white; color: #40454a; outline: none; font-size: 11px; }
 input:focus, textarea:focus, select:focus { border-color: #9299a1; box-shadow: 0 0 0 2px rgb(100 116 139 / 10%); } textarea { resize: vertical; }
-.button-row { display: grid; grid-template-columns: 1fr auto; gap: 7px; }.button-row button { min-height: 32px; padding: 0 10px; font-size: 10px; }.button-row .danger { color: #963e3e; background: #f3e6e6; }
+.button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }.button-row button { min-height: 32px; padding: 0 10px; font-size: 10px; }
 .files-heading { margin-top: 5px; border-top: 1px solid #e6e7e8; padding-top: 8px; }.icon-action { width: 29px; height: 29px; flex: 0 0 29px; }
 .file-picker { padding: 8px; display: grid; gap: 5px; border: 1px solid #dedfe1; border-radius: 9px; background: #f4f4f4; }
 .check-row { grid-template-columns: 16px minmax(0, 1fr); align-items: center; padding: 5px; border-radius: 5px; background: white; }.check-row input { width: 14px; height: 14px; margin: 0; }.check-row strong, .check-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.check-row strong { color: #4b5055; font-size: 10px; }.check-row small { margin-top: 2px; font-size: 8px; }
 .picker-submit { min-height: 30px; font-size: 10px; }.mini-empty { padding: 11px 5px; color: #969ba0; text-align: center; font-size: 10px; }
-.file-row { min-height: 43px; display: grid; grid-template-columns: 30px minmax(0, 1fr) 28px; align-items: center; gap: 7px; border-bottom: 1px solid #ececed; }
-.file-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; background: #f0e8e8; color: #975454; }.file-row > button { width: 28px; height: 28px; background: transparent; color: #777d83; }
-.library-card { padding: 7px; border: 1px solid #e3e4e5; border-radius: 9px; background: white; }.library-file { display: grid; grid-template-columns: 30px minmax(0, 1fr) 27px; align-items: center; gap: 7px; }.delete-file { width: 27px; height: 27px; background: transparent; color: #a35252; }
-.assign-row { margin-top: 7px; display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 5px; }.assign-row select { height: 30px; padding: 0 6px; font-size: 9px; }.assign-row button { width: 30px; height: 30px; }
+.compact-file-card, .library-card { overflow: hidden; border-bottom: 1px solid #e8e9ea; background: transparent; transition: background .16s ease, border-color .16s ease; }.compact-file-card.expanded, .library-card:has(.file-actions) { margin: 2px 0; border: 1px solid #dde0e2; border-radius: 9px; background: white; }
+.file-row, .library-file { min-height: 50px; display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 4px; }.file-open { min-width: 0; min-height: 48px; padding: 5px 2px; display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 8px; text-align: left; background: transparent; }.file-open:hover:not(:disabled) { background: #f1f1f1; }
+.file-thumbnail { width: 38px; height: 38px; overflow: hidden; display: grid; place-items: center; border: 1px solid #e4dddd; border-radius: 7px; background: #f5eded; color: #9a5656; font-size: 15px; }.file-thumbnail img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: top center; }.file-menu { width: 28px; height: 28px; padding: 0; background: transparent; color: #778089; }.file-menu[aria-expanded='true'] { background: #e8e9ea; color: #3f474f; }
+.file-actions { padding: 8px; display: grid; gap: 7px; border-top: 1px solid #e8e9ea; background: #f7f7f7; }.file-actions input { height: 30px; padding: 0 7px; }.file-action-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }.file-action-buttons button { min-width: 0; height: 29px; padding: 0 4px; font-size: 9px; white-space: nowrap; }.file-action-buttons i { margin-right: 4px; }.file-action-buttons .unlink { color: #7b5d42; background: #f1ebe5; }.file-action-buttons .delete-file { color: #a04444; background: #f3e7e7; }
+.library-card { padding: 0 2px; }.library-actions { margin: 0 -2px; }.assign-row { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 5px; }.assign-row select { height: 30px; padding: 0 6px; font-size: 9px; }.assign-row button { width: 30px; height: 30px; }
+.expand-enter-active, .expand-leave-active { transition: opacity .14s ease, max-height .18s ease; overflow: hidden; }.expand-enter-from, .expand-leave-to { max-height: 0; opacity: 0; }.expand-enter-to, .expand-leave-from { max-height: 150px; opacity: 1; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgb(24 29 35 / 38%); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 .create-modal { width: min(440px, 100%); overflow: hidden; border: 1px solid rgb(255 255 255 / 65%); border-radius: 16px; background: #fafafa; box-shadow: 0 24px 70px rgb(15 23 42 / 28%); }
 .create-modal header { min-height: 76px; padding: 15px 17px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e7e7e7; }.create-modal header > div { display: flex; align-items: center; gap: 11px; }.create-modal header > button { width: 32px; height: 32px; background: transparent; }

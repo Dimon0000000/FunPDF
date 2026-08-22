@@ -4,6 +4,7 @@ import (
 	"FunPDF/internal/dto"
 	"FunPDF/internal/entity"
 	"context"
+	"fmt"
 
 	"gorm.io/gorm"
 )
@@ -57,6 +58,17 @@ func (d *FileDAO) GetFileByID(ctx context.Context, fileID string, db *gorm.DB) (
 	return &file, nil
 }
 
+// GetFileThumbnail get file thumbnail
+func (d *FileDAO) GetFileThumbnail(ctx context.Context, db *gorm.DB, fileID string) (string, error) {
+	var file entity.File
+	err := db.WithContext(ctx).Model(&entity.File{}).
+		Where("id = ?", fileID).First(&file).Error
+	if err != nil {
+		return "", err
+	}
+	return file.Thumbnail, nil
+}
+
 // AdvanceRevision update `revision` only
 func (d *FileDAO) AdvanceRevision(ctx context.Context, fileID string, db *gorm.DB, expectedRevision, nextRevision int64) (int64, error) {
 	result := db.WithContext(ctx).Model(&entity.File{}).
@@ -67,10 +79,43 @@ func (d *FileDAO) AdvanceRevision(ctx context.Context, fileID string, db *gorm.D
 	return result.RowsAffected, result.Error
 }
 
+// SaveThumbnail save thumbnail when close the file
+func (d *FileDAO) SaveThumbnail(ctx context.Context, fileID string, db *gorm.DB, req *dto.SaveFileRequest) (int64, error) {
+	result := db.WithContext(ctx).Model(&entity.File{}).
+		Where("id = ? AND revision = ?", fileID, req.ExpectedRevision).
+		Updates(map[string]any{
+			"revision":  req.ExpectedRevision + 1,
+			"thumbnail": *req.Thumbnail,
+		})
+	return result.RowsAffected, result.Error
+}
+
 func (d *FileDAO) UploadFile(ctx context.Context, file *entity.File, db *gorm.DB) (int64, error) {
 	result := db.WithContext(ctx).Model(&entity.File{}).
 		Create(file)
 	return result.RowsAffected, result.Error
+}
+
+// AlertFile update file's metadata
+func (d *FileDAO) AlertFile(ctx context.Context, db *gorm.DB, fileID string, req *dto.AlertFileRequest) (*entity.File, error) {
+	file, err := d.GetFileByID(ctx, fileID, db)
+	if err != nil {
+		return nil, fmt.Errorf("could not find this file: %w", err)
+	}
+
+	err = db.WithContext(ctx).Model(&entity.File{}).
+		Where("id = ?", fileID).
+		Updates(req).Error
+	if err != nil {
+		return nil, fmt.Errorf("could not update this file: %w", err)
+	}
+
+	file, err = d.GetFileByID(ctx, fileID, db)
+	if err != nil {
+		return nil, fmt.Errorf("could not find this file: %w", err)
+	}
+
+	return file, nil
 }
 
 // DeleteFile delete the file by ID

@@ -5,6 +5,7 @@ import type { Album } from './types'
 export interface CachedFile {
   id: string
   name: string
+  thumbnail: string
   mime_type: string
   size: number
   sha256: string
@@ -18,6 +19,11 @@ export interface SaveEditorStateResult {
   file_id: string
   revision: number
   saved_at: string
+}
+
+export interface UpdateFileRequest {
+  name: string
+  mime_type: string
 }
 
 export async function listFiles() {
@@ -36,6 +42,31 @@ export async function listFileAlbums(fileId: string) {
   return unwrapApiResponse<Album[]>(response.data)
 }
 
+export async function updateFile(fileId: string, payload: UpdateFileRequest) {
+  const response = await http.put<CachedFile | { code: number; data: CachedFile }>(
+    `/files/${encodeURIComponent(fileId)}`,
+    payload,
+  )
+  return unwrapApiResponse<CachedFile>(response.data)
+}
+
+/** Expected backend endpoint: returns Cache/{id}/source.pdf as application/pdf. */
+export async function getCachedFileContent(fileId: string) {
+  const response = await http.get<ArrayBuffer>(`/files/${encodeURIComponent(fileId)}/content`, {
+    responseType: 'arraybuffer',
+    timeout: 120_000,
+  })
+  return response.data
+}
+
+/** Expected backend endpoint: returns the parsed editor-state.json payload. */
+export async function getCachedEditorState(fileId: string) {
+  const response = await http.get<FunPdfEditorState | { code: number; data: FunPdfEditorState }>(
+    `/files/${encodeURIComponent(fileId)}/state`,
+  )
+  return unwrapApiResponse<FunPdfEditorState>(response.data)
+}
+
 /** First Ctrl+S: send the immutable source PDF and the initial editable state. */
 export async function cachePdfFile(file: File, editorState: FunPdfEditorState) {
   const form = new FormData()
@@ -50,10 +81,20 @@ export async function cachePdfFile(file: File, editorState: FunPdfEditorState) {
 }
 
 /** Later Ctrl+S: update editor-state.json only. */
-export async function saveEditorState(fileId: string, expectedRevision: number, editorState: FunPdfEditorState) {
+export async function saveEditorState(
+  fileId: string,
+  expectedRevision: number,
+  editorState: FunPdfEditorState,
+  thumbnail?: string,
+) {
+  const payload: Record<string, unknown> = {
+    expected_revision: expectedRevision,
+    editor_state: editorState,
+  }
+  if (thumbnail) payload.thumbnail = thumbnail
   const response = await http.patch<SaveEditorStateResult | { code: number; data?: SaveEditorStateResult }>(
     `/files/${encodeURIComponent(fileId)}/state`,
-    { expected_revision: expectedRevision, editor_state: editorState },
+    payload,
     { timeout: 30_000 },
   )
   if (response.data && typeof response.data === 'object' && 'code' in response.data && !response.data.data) {

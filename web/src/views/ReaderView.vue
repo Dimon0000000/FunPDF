@@ -10,6 +10,10 @@ function openFile() {
   viewerRef.value?.openFileDialog()
 }
 
+function closeFile() {
+  void viewerRef.value?.closeDocument()
+}
+
 function rotate() {
   viewerRef.value?.rotate()
 }
@@ -48,6 +52,7 @@ function printPdf() {
   <main class="reader-layout">
     <TopNavBar
       @open-file="openFile"
+      @close-file="closeFile"
       @rotate="rotate"
       @fit-width="fitWidth"
       @undo="undo"
