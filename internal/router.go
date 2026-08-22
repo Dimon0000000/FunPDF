@@ -27,8 +27,12 @@ func (r *Router) Setup(e *gin.Engine) {
 		{
 			file.GET("", r.fileHandler.ListFiles)
 			file.POST("", r.fileHandler.UploadFile)
-			//file.PUT("/:file_id", r.fileHandler.AlertFile) // TODO finish this API
+
+			file.PUT("/:file_id", r.fileHandler.AlertFile)
 			file.DELETE("/:file_id", r.fileHandler.DeleteFile)
+			file.GET("/:file_id/content", r.fileHandler.GetFile)
+			file.GET("/:file_id/state", r.fileHandler.GetFileState)
+			file.GET("/:file_id/thumbnail", r.fileHandler.GetFileThumbnail)
 			file.PATCH("/:file_id/state", r.fileHandler.SaveFile)
 			file.GET("/:file_id/album", r.fileHandler.ListFileAlbums)
 		}

@@ -8,7 +8,13 @@ import { useReaderStore } from '@/stores/reader'
 import type { PdfAnnotation, PdfPoint } from '@/types/pdf'
 import { FUNPDF_EDITOR_STATE_FORMAT, FUNPDF_PROJECT_VERSION, type FunPdfEditorState } from '@/types/project'
 import { parseProjectText, type ProjectEditorState } from '@/utils/projectFile'
-import { cachePdfFile, saveEditorState } from '@/api/files'
+import {
+  cachePdfFile,
+  getCachedEditorState,
+  getCachedFileContent,
+  saveEditorState,
+  type CachedFile,
+} from '@/api/files'
 import { apiErrorMessage } from '@/api/http'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfWorker
@@ -172,6 +178,8 @@ async function loadFile(file: File) {
     return
   }
 
+  if (originalBytes && !await closeDocument()) return
+
   loading.value = true
   clearTextSelection(true)
   try {
@@ -200,6 +208,149 @@ async function loadFile(file: File) {
   } finally {
     loading.value = false
   }
+}
+
+async function openCachedFile(file: CachedFile) {
+  if (originalBytes && !await closeDocument()) return
+  loading.value = true
+  clearTextSelection(true)
+  try {
+    const [content, state] = await Promise.all([
+      getCachedFileContent(file.id),
+      getCachedEditorState(file.id),
+    ])
+    await openPdfBytes(new Uint8Array(content), file.name, {
+      annotations: state.editor.annotations,
+      rotation: state.editor.rotation,
+      scale: state.editor.scale,
+      currentPage: state.editor.current_page,
+    })
+    cachedFileId = file.id
+    cachedFileRevision = file.revision
+    cachedFileSha256 = file.sha256
+    setStatus(`已从公共文件区打开 ${file.name}`)
+  } catch (error) {
+    console.error(error)
+    setStatus(apiErrorMessage(error, '无法打开公共文件，请检查后端内容与状态接口'))
+  } finally {
+    loading.value = false
+  }
+}
+
+async function generateDocumentThumbnail() {
+  if (!pdfDocument.value) return ''
+  const page = await pdfDocument.value.getPage(1)
+  const baseViewport = page.getViewport({ scale: 1, rotation: rotation.value })
+  const targetWidth = 240
+  const viewport = page.getViewport({
+    scale: targetWidth / baseViewport.width,
+    rotation: rotation.value,
+  })
+  const canvas = document.createElement('canvas')
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+  canvas.width = Math.max(Math.round(viewport.width * pixelRatio), 1)
+  canvas.height = Math.max(Math.round(viewport.height * pixelRatio), 1)
+  const context = canvas.getContext('2d')
+  if (!context) return ''
+  await page.render({
+    canvas,
+    canvasContext: context,
+    viewport,
+    transform: pixelRatio === 1 ? undefined : [pixelRatio, 0, 0, pixelRatio, 0, 0],
+  }).promise
+
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+  for (const annotation of annotations[1] ?? []) {
+    context.save()
+    context.strokeStyle = annotation.color
+    context.fillStyle = annotation.color
+    context.lineWidth = Math.max(annotation.width * viewport.scale, 0.75)
+    if (annotation.type === 'pen' && annotation.points.length > 1) {
+      context.beginPath()
+      annotation.points.forEach((value, index) => {
+        const [x, y] = viewport.convertToViewportPoint(value.x, value.y)
+        index === 0 ? context.moveTo(x, y) : context.lineTo(x, y)
+      })
+      context.stroke()
+    } else if (annotation.type === 'highlight') {
+      const [startX, startY] = viewport.convertToViewportPoint(annotation.start.x, annotation.start.y)
+      const [endX, endY] = viewport.convertToViewportPoint(annotation.end.x, annotation.end.y)
+      context.globalAlpha = 0.28
+      context.fillRect(Math.min(startX, endX), Math.min(startY, endY), Math.abs(endX - startX), Math.abs(endY - startY))
+    } else if (annotation.type === 'underline' || annotation.type === 'strike') {
+      const [startX, startY] = viewport.convertToViewportPoint(annotation.start.x, annotation.start.y)
+      const [endX, endY] = viewport.convertToViewportPoint(annotation.end.x, annotation.end.y)
+      context.beginPath()
+      context.moveTo(startX, startY)
+      context.lineTo(endX, endY)
+      context.stroke()
+    } else if (annotation.type === 'note') {
+      const [x, y] = viewport.convertToViewportPoint(annotation.point.x, annotation.point.y)
+      const radius = Math.max(11 * viewport.scale, 4)
+      context.beginPath()
+      context.arc(x, y, radius, 0, Math.PI * 2)
+      context.fill()
+      context.fillStyle = '#fff'
+      context.font = `bold ${Math.max(12 * viewport.scale, 5)}px sans-serif`
+      context.textAlign = 'center'
+      context.textBaseline = 'middle'
+      context.fillText('!', x, y)
+    }
+    context.restore()
+  }
+  return canvas.toDataURL('image/jpeg', 0.78)
+}
+
+function resetOpenedDocument() {
+  renderGeneration++
+  cancelPageRendering()
+  pageObserver?.disconnect()
+  pageObserver = null
+  void pdfLoadingTask?.destroy()
+  pdfLoadingTask = null
+  pdfDocument.value = null
+  originalBytes = null
+  annotations = {}
+  undoStack = []
+  redoStack = []
+  pageLayouts.value = []
+  pageLinks.value = {}
+  pageElements.clear()
+  pageCanvases.clear()
+  annotationCanvases.clear()
+  textLayerElements.clear()
+  pageViewports.clear()
+  cachedFileId = ''
+  cachedFileRevision = 0
+  cachedFileSha256 = ''
+  store.resetDocumentState()
+  store.documentName = ''
+}
+
+async function closeDocument() {
+  if (!originalBytes || saving.value || exporting.value) return !originalBytes
+  if (cachedFileId) {
+    try {
+      const thumbnail = await generateDocumentThumbnail()
+      if (!thumbnail || !await saveProject({ quiet: true, thumbnail })) return false
+      window.dispatchEvent(new Event('funpdf:files-changed'))
+    } catch (error) {
+      console.error(error)
+      setStatus(apiErrorMessage(error, '关闭文件前更新缩略图失败'))
+      return false
+    }
+  } else if (store.dirty && !window.confirm('当前文档尚未保存，确定关闭吗？')) {
+    return false
+  }
+  resetOpenedDocument()
+  return true
+}
+
+function handleOpenCachedFile(event: Event) {
+  const file = (event as CustomEvent<{ file?: CachedFile }>).detail?.file
+  if (file) void openCachedFile(file)
 }
 
 async function openPdfBytes(bytes: Uint8Array, documentName: string, restored?: ProjectEditorState) {
@@ -931,7 +1082,7 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-async function saveProject(options: { quiet?: boolean } = {}) {
+async function saveProject(options: { quiet?: boolean; thumbnail?: string } = {}) {
   if (!originalBytes || saving.value) return false
   saving.value = true
   try {
@@ -956,7 +1107,12 @@ async function saveProject(options: { quiet?: boolean } = {}) {
     }
 
     if (cachedFileId) {
-      const result = await saveEditorState(cachedFileId, cachedFileRevision, state)
+      const result = await saveEditorState(
+        cachedFileId,
+        cachedFileRevision,
+        state,
+        options.thumbnail,
+      )
       cachedFileRevision = result.revision
       store.dirty = false
       if (!options.quiet) setStatus(`编辑状态已保存到 Cache/${cachedFileId}（版本 ${cachedFileRevision}）`)
@@ -1026,7 +1182,7 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = ''
 }
 
-defineExpose({ openFileDialog, rotate, fitWidth, undo, redo, clearAnnotations, saveProject, exportPdf, printPdf })
+defineExpose({ openFileDialog, closeDocument, rotate, fitWidth, undo, redo, clearAnnotations, saveProject, exportPdf, printPdf })
 
 watch(() => store.scale, () => void refreshPageFlow(true))
 watch(() => store.currentPage, page => {
@@ -1044,12 +1200,14 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('beforeunload', handleBeforeUnload)
   document.addEventListener('selectionchange', handleSelectionChange)
+  window.addEventListener('funpdf:open-cached-file', handleOpenCachedFile)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('beforeunload', handleBeforeUnload)
   document.removeEventListener('selectionchange', handleSelectionChange)
+  window.removeEventListener('funpdf:open-cached-file', handleOpenCachedFile)
   pageObserver?.disconnect()
   if (scrollFrame) cancelAnimationFrame(scrollFrame)
   cancelPageRendering()

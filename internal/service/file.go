@@ -31,6 +31,47 @@ func (s *FileService) ListFiles(ctx context.Context) ([]entity.File, error) {
 	return fileList, err
 }
 
+// GetFile get file content
+func (s *FileService) GetFile(ctx context.Context, fileID string) (string, error) {
+	fileRecord, err := s.fileDAO.GetFileByID(ctx, fileID, dao.DB)
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(s.cacheDir, fileRecord.FileStorageKey, "source.pdf"), nil
+}
+
+// GetFileState get file state
+func (s *FileService) GetFileState(ctx context.Context, fileID string) (json.RawMessage, error) {
+	fileRecord, err := s.fileDAO.GetFileByID(ctx, fileID, dao.DB)
+	if err != nil {
+		return nil, err
+	}
+
+	filePath := filepath.Join(s.cacheDir, fileRecord.FileStorageKey, "editor-state.json")
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	jsonBytes, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonBytes, nil
+}
+
+// GetFileThumbnail get file thumbnail
+func (s *FileService) GetFileThumbnail(ctx context.Context, fileID string) (string, error) {
+	thumbnail, err := s.fileDAO.GetFileThumbnail(ctx, dao.DB, fileID)
+	if err != nil || thumbnail == "" {
+		return "", err
+	}
+	return thumbnail, nil
+}
+
 // SaveFile file to local storage
 func (s *FileService) SaveFile(ctx context.Context, fileID string, req *dto.SaveFileRequest) (bool, error) {
 	file, err := s.fileDAO.GetFileByID(ctx, fileID, dao.DB)
@@ -97,7 +138,12 @@ func (s *FileService) SaveFile(ctx context.Context, fileID string, req *dto.Save
 		return false, fmt.Errorf("replace state file failed: %v", err)
 	}
 
-	affected, err := s.fileDAO.AdvanceRevision(ctx, fileID, dao.DB, file.Revision, file.Revision+1)
+	var affected int64
+	if req.Thumbnail != nil {
+		affected, err = s.fileDAO.SaveThumbnail(ctx, fileID, dao.DB, req)
+	} else {
+		affected, err = s.fileDAO.AdvanceRevision(ctx, fileID, dao.DB, file.Revision, file.Revision+1)
+	}
 	if err != nil {
 		_ = os.Remove(statePath)
 		_ = os.Rename(bakPath, statePath)
@@ -183,6 +229,28 @@ func (s *FileService) UploadFile(ctx context.Context, req *dto.UploadFileRequest
 	}
 
 	tempDir = ""
+	return file, nil
+}
+
+// AlertFile update file's metadata
+func (s *FileService) AlertFile(ctx context.Context, fileID string, req *dto.AlertFileRequest) (*entity.File, error) {
+	fileName := strings.TrimSpace(req.Name)
+	if fileName == "" {
+		return nil, fmt.Errorf("file name is empty")
+	}
+
+	mimeType := strings.TrimSpace(req.MimeType)
+	if mimeType == "" {
+		return nil, fmt.Errorf("mime_type is empty")
+	}
+
+	req.Name = fileName
+	req.MimeType = mimeType
+
+	file, err := s.fileDAO.AlertFile(ctx, dao.DB, fileID, req)
+	if err != nil {
+		return nil, err
+	}
 	return file, nil
 }
 

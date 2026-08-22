@@ -25,6 +25,9 @@ function selectItem(id: string) {
 
 <template>
   <aside class="sidebar-shell">
+    <button class="rail-brand" title="FunPDF" @click="selectItem('albums')">
+      <img src="/FunPDF.png" alt="FunPDF" />
+    </button>
     <nav class="rail" aria-label="文档导航">
       <button
         v-for="item in items"
@@ -115,8 +118,11 @@ function selectItem(id: string) {
 
 <style scoped>
 .sidebar-shell { height: 100%; display: flex; background: #f6f6f6; border-right: 1px solid #dedede; position: relative; z-index: 10; }
-.rail { width: 48px; flex: 0 0 48px; display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 4px; background: #f3f3f3; }
-.rail-button, .close-button { border: 0; background: transparent; color: #62676d; cursor: pointer; }
+.rail { width: 48px; flex: 0 0 48px; display: flex; flex-direction: column; align-items: center; padding-top: 50px; gap: 4px; background: #f3f3f3; }
+.rail-button, .rail-brand, .close-button { border: 0; background: transparent; color: #62676d; cursor: pointer; }
+.rail-brand { position: absolute; left: 6px; top: 8px; width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; padding: 4px; z-index: 1; }
+.rail-brand:hover { background: #e8e8e8; }
+.rail-brand img { width: 100%; height: 100%; display: block; object-fit: contain; border-radius: 6px; }
 .rail-button { width: 36px; height: 36px; border-radius: 7px; display: grid; place-items: center; position: relative; }
 .rail-button:hover { background: #e8e8e8; }
 .rail-button.active { background: #dedede; color: #262a2f; }
