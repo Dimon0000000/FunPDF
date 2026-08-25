@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useReaderStore } from '@/stores/reader'
 import type { SidebarItem } from '@/types/pdf'
 import ProjectPanel from '@/components/ProjectPanel.vue'
@@ -6,6 +7,9 @@ import ProviderPanel from '@/components/ProviderPanel.vue'
 import TranslationPanel from '@/components/TranslationPanel.vue'
 
 const store = useReaderStore()
+const SIDEBAR_WIDTH_KEY = 'funpdf.sidebarPanelWidth'
+const sidebarWidth = ref(initialSidebarWidth())
+const resizing = ref(false)
 
 const items: SidebarItem[] = [
   { id: 'albums', label: '项目', icon: 'fa-regular fa-folder-open' },
@@ -20,6 +24,46 @@ const items: SidebarItem[] = [
 function selectItem(id: string) {
   if (store.activeSidebar === id && store.sidebarOpen) store.setSidebarOpen(false)
   else store.setActiveSidebar(id)
+}
+
+function initialSidebarWidth() {
+  const fallback = 300
+  if (typeof window === 'undefined') return fallback
+  const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY))
+  return normalizeSidebarWidth(Number.isFinite(saved) && saved > 0 ? saved : fallback)
+}
+
+function normalizeSidebarWidth(width: number) {
+  if (typeof window === 'undefined') return Math.min(Math.max(width, 260), 520)
+  const max = Math.max(Math.min(window.innerWidth - 160, 560), 260)
+  return Math.min(Math.max(width, 260), max)
+}
+
+const sidebarPanelStyle = computed(() => ({ width: `${sidebarWidth.value}px` }))
+
+function startResize(event: PointerEvent) {
+  const target = event.currentTarget as HTMLElement
+  target.setPointerCapture(event.pointerId)
+  resizing.value = true
+}
+
+function moveResize(event: PointerEvent) {
+  if (!resizing.value) return
+  const shellRect = (event.currentTarget as HTMLElement).closest('.sidebar-shell')?.getBoundingClientRect()
+  if (!shellRect) return
+  sidebarWidth.value = normalizeSidebarWidth(event.clientX - shellRect.left - 48)
+}
+
+function endResize(event: PointerEvent) {
+  if (!resizing.value) return
+  resizing.value = false
+  const target = event.currentTarget as HTMLElement
+  if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value))
+  } catch {
+    // Ignore unavailable storage.
+  }
 }
 
 function handleSidebarWheel(event: WheelEvent) {
@@ -61,7 +105,7 @@ function handleSidebarWheel(event: WheelEvent) {
     </nav>
 
     <transition name="sidebar">
-      <section v-if="store.sidebarOpen" class="sidebar-panel" @wheel="handleSidebarWheel">
+      <section v-if="store.sidebarOpen" class="sidebar-panel" :style="sidebarPanelStyle" @wheel="handleSidebarWheel">
         <div class="panel-header">
           <div>
             <div class="panel-title">{{ items.find(item => item.id === store.activeSidebar)?.label }}</div>
@@ -101,20 +145,38 @@ function handleSidebarWheel(event: WheelEvent) {
         <div v-else-if="store.activeSidebar === 'annotations'" class="panel-content">
           <div class="annotation-summary">
             <strong>{{ store.noteCount }}</strong>
-            <span>条便签批注</span>
+            <span>条便签</span>
           </div>
           <div v-if="store.noteCount === 0" class="empty">选中文字后点击便签，或直接使用便签工具在页面上添加独立便签。</div>
-          <button
-            v-for="comment in store.noteComments"
-            v-else
-            :key="comment.id"
-            class="comment-item"
-            @click="store.currentPage = comment.page"
-          >
-            <span>第 {{ comment.page }} 页</span>
-            <strong>{{ comment.text }}</strong>
-            <small v-if="comment.quoteText">{{ comment.quoteText }}</small>
-          </button>
+          <template v-else>
+            <h3 class="comment-group-title">批注</h3>
+            <button
+              v-for="comment in store.noteComments.filter(item => item.text)"
+              :key="comment.id"
+              class="comment-item"
+              @click="store.currentPage = comment.page"
+            >
+              <span>第 {{ comment.page }} 页</span>
+              <strong>{{ comment.text }}</strong>
+              <small v-if="comment.quoteText">{{ comment.quoteText }}</small>
+            </button>
+            <div v-if="!store.noteComments.some(item => item.text)" class="empty compact-empty">暂无批注便签。</div>
+
+            <h3 class="comment-group-title">翻译</h3>
+            <template v-for="comment in store.noteComments" :key="`${comment.id}-translations`">
+              <button
+                v-for="translation in comment.translations ?? []"
+                :key="translation.id"
+                class="comment-item translation-item"
+                @click="store.currentPage = comment.page"
+              >
+                <span>第 {{ comment.page }} 页</span>
+                <strong>{{ translation.translatedText }}</strong>
+                <small>{{ translation.sourceText }}</small>
+              </button>
+            </template>
+            <div v-if="!store.noteComments.some(item => item.translations?.length)" class="empty compact-empty">暂无翻译便签。</div>
+          </template>
         </div>
 
         <div v-else-if="store.activeSidebar === 'outline'" class="panel-content">
@@ -134,6 +196,14 @@ function handleSidebarWheel(event: WheelEvent) {
           <div class="feature-card"><i class="fa-solid fa-wand-magic-sparkles"></i><div><strong>AI 功能</strong><p>解释、摘要、问答和论文检索将在后续版本中提供。</p></div></div>
         </div>
 
+        <div
+          class="resize-handle"
+          title="拖动调整侧栏宽度"
+          @pointerdown.prevent="startResize"
+          @pointermove.prevent="moveResize"
+          @pointerup.prevent="endResize"
+          @pointercancel.prevent="endResize"
+        ></div>
       </section>
     </transition>
   </aside>
@@ -151,7 +221,9 @@ function handleSidebarWheel(event: WheelEvent) {
 .rail-button.active { background: #dedede; color: #262a2f; }
 .rail-button.active::before { content: ''; position: absolute; left: -6px; top: 8px; width: 3px; height: 20px; border-radius: 4px; background: #5f6873; }
 .count-badge { position: absolute; right: -3px; top: -2px; min-width: 16px; height: 16px; padding: 0 3px; display: grid; place-items: center; border-radius: 8px; background: #555b62; color: white; font-size: 9px; }
-.sidebar-panel { width: 260px; height: 100%; min-height: 0; background: #fafafa; display: flex; flex-direction: column; border-left: 1px solid #ececec; overflow: hidden; }
+.sidebar-panel { height: 100%; min-height: 0; background: #fafafa; display: flex; flex-direction: column; border-left: 1px solid #ececec; overflow: hidden; position: relative; }
+.resize-handle { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 2; }
+.resize-handle:hover { background: rgb(90 96 104 / 10%); }
 .panel-header { height: 60px; flex: 0 0 60px; padding: 0 14px 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e5e9ee; }
 .panel-title { font-size: 14px; font-weight: 700; color: #30343a; }
 .panel-subtitle { width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font-size: 11px; color: #94a3b8; }
@@ -176,6 +248,9 @@ function handleSidebarWheel(event: WheelEvent) {
 .comment-item span { display: block; margin-bottom: 6px; color: #858a90; font-size: 11px; }
 .comment-item strong { display: -webkit-box; overflow: hidden; color: #353a40; font-size: 13px; line-height: 1.45; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .comment-item small { display: -webkit-box; overflow: hidden; margin-top: 7px; padding-top: 7px; border-top: 1px solid #e4e4e4; color: #8a6d21; font-size: 11px; line-height: 1.45; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.comment-group-title { margin: 14px 0 4px; color: #555b62; font-size: 12px; }
+.compact-empty { padding: 10px 8px; font-size: 12px; }
+.translation-item strong { color: #315b72; }
 .tip-card { margin-top: 10px; padding: 12px; border-radius: 8px; background: #f0f0f0; color: #676c72; font-size: 12px; line-height: 1.6; }
 .tip-card i { color: #666c73; margin-right: 5px; }
 .feature-card { padding: 14px; border-radius: 9px; border: 1px solid #e2e2e2; background: #f7f7f7; display: flex; gap: 12px; color: #565b61; }
