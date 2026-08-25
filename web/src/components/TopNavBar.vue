@@ -46,15 +46,21 @@ function chooseTool(tool: ToolType) {
         <i class="fa-solid fa-bars"></i>
       </button>
 
-      <button class="brand-button" title="FunPDF">
-        <img src="/FunPDF-Banner.png" alt="FunPDF" class="brand-banner-img" />
-      </button>
+      <template v-if="!hasDocument">
+        <button class="brand-button" title="FunPDF">
+          <img src="/FunPDF-Banner.png" alt="FunPDF" class="brand-banner-img" />
+        </button>
 
-      <div class="divider"></div>
+        <div class="divider"></div>
 
-      <button class="tool-button open-button" @click="emit('openFile')">
+        <button class="tool-button open-button" @click="emit('openFile')">
+          <i class="fa-regular fa-folder-open"></i>
+          <span>打开 PDF</span>
+        </button>
+      </template>
+
+      <button v-else class="icon-button open-icon-button" title="打开新的 PDF" @click="emit('openFile')">
         <i class="fa-regular fa-folder-open"></i>
-        <span>打开 PDF</span>
       </button>
     </div>
 
@@ -209,6 +215,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 
 .brand-button { height: 36px; display: flex; align-items: center; border-radius: 7px; padding: 4px 8px; }
 .brand-banner-img { width: 112px; height: 27px; display: block; object-fit: contain; }
+.open-icon-button { font-size: 18px; }
 .brand-name { font-weight: 700; color: #262a2f; letter-spacing: -0.2px; }
 .divider { width: 1px; height: 24px; background: #dadada; margin: 0 4px; }
 .compact-divider { margin-left: 2px; }

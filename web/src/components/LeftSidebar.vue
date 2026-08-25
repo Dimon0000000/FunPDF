@@ -54,8 +54,8 @@ function handleSidebarWheel(event: WheelEvent) {
         @click="selectItem(item.id)"
       >
         <i :class="item.icon"></i>
-        <span v-if="item.id === 'annotations' && store.annotationCount" class="count-badge">
-          {{ store.annotationCount > 99 ? '99+' : store.annotationCount }}
+        <span v-if="item.id === 'annotations' && store.noteCount" class="count-badge">
+          {{ store.noteCount > 99 ? '99+' : store.noteCount }}
         </span>
       </button>
     </nav>
@@ -100,14 +100,21 @@ function handleSidebarWheel(event: WheelEvent) {
 
         <div v-else-if="store.activeSidebar === 'annotations'" class="panel-content">
           <div class="annotation-summary">
-            <strong>{{ store.annotationCount }}</strong>
-            <span>条标注</span>
+            <strong>{{ store.noteCount }}</strong>
+            <span>条便签批注</span>
           </div>
-          <div v-if="store.annotationCount === 0" class="empty">选择上方的画笔、高亮、划线或便签工具，即可在页面上添加标注。</div>
-          <div v-else class="tip-card">
-            <i class="fa-solid fa-circle-info"></i>
-            标注会随页面缩放和旋转，并可通过“导出”写入新的 PDF 文件。
-          </div>
+          <div v-if="store.noteCount === 0" class="empty">选中文字后点击便签，或直接使用便签工具在页面上添加独立便签。</div>
+          <button
+            v-for="comment in store.noteComments"
+            v-else
+            :key="comment.id"
+            class="comment-item"
+            @click="store.currentPage = comment.page"
+          >
+            <span>第 {{ comment.page }} 页</span>
+            <strong>{{ comment.text }}</strong>
+            <small v-if="comment.quoteText">{{ comment.quoteText }}</small>
+          </button>
         </div>
 
         <div v-else-if="store.activeSidebar === 'outline'" class="panel-content">
@@ -164,6 +171,11 @@ function handleSidebarWheel(event: WheelEvent) {
 .annotation-summary { padding: 14px; border-radius: 9px; background: #ededed; color: #41464d; display: flex; align-items: baseline; gap: 6px; }
 .annotation-summary strong { font-size: 24px; }
 .annotation-summary span { font-size: 12px; }
+.comment-item { width: 100%; margin-top: 10px; padding: 11px; border: 1px solid #e1e1e1; border-radius: 9px; background: #f8f8f8; color: #3f4449; cursor: pointer; text-align: left; }
+.comment-item:hover { background: #eeeeee; }
+.comment-item span { display: block; margin-bottom: 6px; color: #858a90; font-size: 11px; }
+.comment-item strong { display: -webkit-box; overflow: hidden; color: #353a40; font-size: 13px; line-height: 1.45; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.comment-item small { display: -webkit-box; overflow: hidden; margin-top: 7px; padding-top: 7px; border-top: 1px solid #e4e4e4; color: #8a6d21; font-size: 11px; line-height: 1.45; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tip-card { margin-top: 10px; padding: 12px; border-radius: 8px; background: #f0f0f0; color: #676c72; font-size: 12px; line-height: 1.6; }
 .tip-card i { color: #666c73; margin-right: 5px; }
 .feature-card { padding: 14px; border-radius: 9px; border: 1px solid #e2e2e2; background: #f7f7f7; display: flex; gap: 12px; color: #565b61; }
