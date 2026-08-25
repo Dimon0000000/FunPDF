@@ -25,6 +25,11 @@ export interface PdfPoint {
   y: number
 }
 
+export interface PdfRect {
+  start: PdfPoint
+  end: PdfPoint
+}
+
 interface AnnotationBase {
   id: string
   page: number
@@ -53,6 +58,8 @@ export interface NoteAnnotation extends AnnotationBase {
   type: 'note'
   point: PdfPoint
   text: string
+  quoteText?: string
+  quoteRects?: PdfRect[]
 }
 
 export type PdfAnnotation =

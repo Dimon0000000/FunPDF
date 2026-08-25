@@ -24,6 +24,8 @@ export const useReaderStore = defineStore('reader', {
     annotationColor: '#ef4444',
     annotationWidth: 3,
     annotationCount: 0,
+    noteCount: 0,
+    noteComments: [] as Array<{ id: string; page: number; text: string; quoteText?: string }>,
     canUndo: false,
     canRedo: false,
     dirty: false,
@@ -60,6 +62,8 @@ export const useReaderStore = defineStore('reader', {
       this.currentPage = 1
       this.totalPages = 0
       this.annotationCount = 0
+      this.noteCount = 0
+      this.noteComments = []
       this.canUndo = false
       this.canRedo = false
       this.dirty = false

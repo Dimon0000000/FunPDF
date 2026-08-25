@@ -5,7 +5,7 @@ import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument, rgb } from 'pdf-lib'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { useReaderStore } from '@/stores/reader'
-import type { PdfAnnotation, PdfPoint } from '@/types/pdf'
+import type { PdfAnnotation, PdfPoint, PdfRect } from '@/types/pdf'
 import { FUNPDF_EDITOR_STATE_FORMAT, FUNPDF_PROJECT_VERSION, type FunPdfEditorState } from '@/types/project'
 import { parseProjectText, type ProjectEditorState } from '@/utils/projectFile'
 import {
@@ -61,6 +61,8 @@ const noteEditor = ref({
   annotationId: '',
   point: { x: 0, y: 0 } as PdfPoint,
   text: '',
+  quoteText: '',
+  quoteRects: [] as PdfRect[],
   left: 0,
   top: 0,
 })
@@ -115,6 +117,17 @@ function updateHistoryState() {
   store.canUndo = undoStack.length > 0
   store.canRedo = redoStack.length > 0
   store.annotationCount = Object.values(annotations).reduce((sum, page) => sum + page.length, 0)
+  const notes = Object.values(annotations)
+    .flat()
+    .filter((annotation): annotation is Extract<PdfAnnotation, { type: 'note' }> => annotation.type === 'note')
+    .sort((a, b) => a.page - b.page)
+  store.noteCount = notes.length
+  store.noteComments = notes.map(note => ({
+    id: note.id,
+    page: note.page,
+    text: note.text,
+    quoteText: note.quoteText,
+  }))
   renderRevision.value++
 }
 
@@ -687,6 +700,15 @@ function drawAnnotations(page: number) {
       context.lineTo(end.x, end.y)
       context.stroke()
     } else if (annotation.type === 'note') {
+      if (annotation.quoteRects?.length) {
+        context.globalAlpha = 0.16
+        for (const quoteRect of annotation.quoteRects) {
+          const start = viewportPoint(quoteRect.start, page)
+          const end = viewportPoint(quoteRect.end, page)
+          context.fillRect(Math.min(start.x, end.x), Math.min(start.y, end.y), Math.abs(end.x - start.x), Math.abs(end.y - start.y))
+        }
+        context.globalAlpha = 1
+      }
       const point = viewportPoint(annotation.point, page)
       context.beginPath()
       context.arc(point.x, point.y, 11, 0, Math.PI * 2)
@@ -826,6 +848,14 @@ function noteMarkers(page: number) {
 }
 
 function openNoteEditor(page: number, point: PdfPoint, local: PdfPoint, annotation?: PdfAnnotation) {
+  if (
+    annotation?.type === 'note'
+    && noteEditor.value.open
+    && noteEditor.value.annotationId === annotation.id
+  ) {
+    noteEditor.value.open = false
+    return
+  }
   const viewport = pageViewport(page)
   noteEditor.value = {
     open: true,
@@ -833,9 +863,43 @@ function openNoteEditor(page: number, point: PdfPoint, local: PdfPoint, annotati
     annotationId: annotation?.id ?? '',
     point,
     text: annotation?.type === 'note' ? annotation.text : '',
+    quoteText: annotation?.type === 'note' ? annotation.quoteText ?? '' : '',
+    quoteRects: annotation?.type === 'note' ? annotation.quoteRects ?? [] : [],
     left: Math.min(local.x + 16, Math.max((viewport?.width ?? 320) - 280, 8)),
     top: Math.min(local.y + 16, Math.max((viewport?.height ?? 220) - 190, 8)),
   }
+  nextTick(() => document.querySelector<HTMLTextAreaElement>('.note-editor textarea')?.focus())
+}
+
+function openSelectedTextNoteEditor() {
+  const page = textSelection.value.page
+  if (!page || !pageViewport(page) || !textSelection.value.rects.length) return
+  const rects = textSelection.value.rects.map(clientRect => {
+    const rect = viewportRect(clientRect, page)
+    return {
+      start: pdfPoint({ x: rect.left, y: rect.top }, page),
+      end: pdfPoint({ x: rect.right, y: rect.bottom }, page),
+    }
+  })
+  const lastClientRect = textSelection.value.rects[textSelection.value.rects.length - 1]
+  const lastRect = viewportRect(lastClientRect, page)
+  const local = {
+    x: Math.min(lastRect.right + 18, (pageViewport(page)?.width ?? lastRect.right) - 16),
+    y: Math.max(lastRect.top + (lastRect.bottom - lastRect.top) / 2, 16),
+  }
+  const point = pdfPoint(local, page)
+  noteEditor.value = {
+    open: true,
+    page,
+    annotationId: '',
+    point,
+    text: '',
+    quoteText: textSelection.value.text,
+    quoteRects: rects,
+    left: Math.min(local.x + 16, Math.max((pageViewport(page)?.width ?? 320) - 280, 8)),
+    top: Math.min(local.y + 16, Math.max((pageViewport(page)?.height ?? 220) - 190, 8)),
+  }
+  clearTextSelection(true)
   nextTick(() => document.querySelector<HTMLTextAreaElement>('.note-editor textarea')?.focus())
 }
 
@@ -845,8 +909,23 @@ function saveNote() {
   const page = noteEditor.value.page
   pushHistory()
   const existing = annotationsForPage(page).find(annotation => annotation.id === noteEditor.value.annotationId)
-  if (existing?.type === 'note') existing.text = text
-  else annotationsForPage(page).push({ id: makeId(), page, type: 'note', color: store.annotationColor, width: 1, point: noteEditor.value.point, text })
+  if (existing?.type === 'note') {
+    existing.text = text
+    existing.quoteText = noteEditor.value.quoteText || undefined
+    existing.quoteRects = noteEditor.value.quoteRects.length ? noteEditor.value.quoteRects : undefined
+  } else {
+    annotationsForPage(page).push({
+      id: makeId(),
+      page,
+      type: 'note',
+      color: store.annotationColor,
+      width: 1,
+      point: noteEditor.value.point,
+      text,
+      quoteText: noteEditor.value.quoteText || undefined,
+      quoteRects: noteEditor.value.quoteRects.length ? noteEditor.value.quoteRects : undefined,
+    })
+  }
   noteEditor.value.open = false
   updateHistoryState()
   drawAnnotations(page)
@@ -1193,6 +1272,7 @@ watch(() => store.currentPage, page => {
 }, { flush: 'sync' })
 watch(() => store.activeTool, (tool, previous) => {
   if (tool === 'highlight' && previous === 'cursor' && textSelection.value.open) return highlightSelectedText()
+  if (tool === 'note' && previous === 'cursor' && textSelection.value.open) return openSelectedTextNoteEditor()
   if (tool !== 'cursor') clearTextSelection(true)
 })
 
@@ -1299,6 +1379,7 @@ onBeforeUnmount(() => {
             <button @click="copySelectedText"><i class="fa-regular fa-copy"></i>复制</button>
             <span></span>
             <button @click="highlightSelectedText"><i class="fa-solid fa-highlighter"></i>高亮</button>
+            <button @click="openSelectedTextNoteEditor"><i class="fa-regular fa-note-sticky"></i>便签</button>
           </div>
 
           <div
@@ -1308,6 +1389,7 @@ onBeforeUnmount(() => {
             @pointerdown.stop
           >
             <strong>{{ noteEditor.annotationId ? '编辑便签' : '添加便签' }}</strong>
+            <blockquote v-if="noteEditor.quoteText">{{ noteEditor.quoteText }}</blockquote>
             <textarea v-model="noteEditor.text" maxlength="500" placeholder="输入备注内容…"></textarea>
             <div><button class="secondary" @click="noteEditor.open = false">取消</button><button @click="saveNote">保存</button></div>
           </div>
@@ -1360,6 +1442,7 @@ onBeforeUnmount(() => {
 .selection-toolbar > span { width: 1px; height: 20px; background: #ddd; }
 .note-editor { position: absolute; z-index: 7; width: 260px; padding: 13px; border-radius: 10px; background: #fffdf5; border: 1px solid #ead99c; box-shadow: 0 10px 30px rgb(0 0 0 / 20%); }
 .note-editor strong { display: block; margin-bottom: 8px; color: #713f12; font-size: 13px; }
+.note-editor blockquote { max-height: 74px; overflow: auto; margin: 0 0 8px; padding: 7px 9px; border-left: 3px solid #d6b75d; border-radius: 5px; background: rgb(255 247 214 / 72%); color: #6b4e16; font-size: 12px; line-height: 1.45; }
 .note-editor textarea { width: 100%; height: 92px; resize: vertical; border: 1px solid #e4d6ad; border-radius: 6px; padding: 8px; outline: none; color: #422006; background: white; font-size: 13px; }
 .note-editor > div { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
 .note-editor button { border: 0; border-radius: 6px; padding: 6px 11px; background: #6a5b48; color: white; cursor: pointer; font-size: 12px; }
