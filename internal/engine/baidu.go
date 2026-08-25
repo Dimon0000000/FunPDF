@@ -13,18 +13,15 @@ import (
 	"time"
 )
 
-var URL = "https://fanyi-api.baidu.com/ait/api/aiTextTranslate"
-var APIReference = "https://fanyi-api.baidu.com/doc/21"
+const (
+	BaiduTranslateURL           = "https://fanyi-api.baidu.com/ait/api/aiTextTranslate"
+	BaiduTranslatorAPIReference = "https://fanyi-api.baidu.com/doc/21"
+)
 
 type BaiduTranslator struct {
 	APIKey     string `json:"api_key"`
 	APPID      string `json:"app_id"`
 	httpClient *http.Client
-	//From      string `json:"from"`
-	//To        string `json:"to,"`
-	//Q         string `json:"q"`
-	//ModelType string `json:"model_type,omitempty"`
-	//Reference string `json:"reference,omitempty"`
 }
 
 func NewBaiduTranslator(apiKey string, appID string) *BaiduTranslator {
@@ -32,7 +29,7 @@ func NewBaiduTranslator(apiKey string, appID string) *BaiduTranslator {
 		APIKey: apiKey,
 		APPID:  appID,
 		httpClient: &http.Client{
-			Timeout: time.Minute * 15,
+			Timeout: time.Second * 15,
 		},
 	}
 }
@@ -88,7 +85,7 @@ func (b *BaiduTranslator) Translate(ctx context.Context, from, to, q string, par
 	toCtx, cancel := context.WithTimeout(ctx, b.httpClient.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(toCtx, "POST", URL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(toCtx, "POST", BaiduTranslateURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("new request: %w", err)
 	}
@@ -134,7 +131,7 @@ func (b *BaiduTranslator) Translate(ctx context.Context, from, to, q string, par
 // Healthy check baidu translator is healthy
 func (b *BaiduTranslator) Healthy(ctx context.Context) bool {
 	_, err := b.Translate(ctx, "en", "zh", "hi", nil)
-	common.Info(fmt.Sprintf("please read %s for more info", APIReference))
+	common.Info(fmt.Sprintf("please read %s for more info", BaiduTranslatorAPIReference))
 	return err == nil
 }
 
