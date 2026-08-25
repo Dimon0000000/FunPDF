@@ -16,6 +16,7 @@ export interface TranslationCompletionRequest {
   text: string
   source_language?: string
   target_language: string
+  params?: Record<string, unknown>
 }
 
 export interface TranslationCompletion {
@@ -43,12 +44,12 @@ function toBackendLanguageCode(language: string) {
 }
 
 export async function completeTranslation(translatorName: string, payload: TranslationCompletionRequest) {
-  const backendPayload: Record<string, string | Record<string, never> | undefined> = {
+  const backendPayload: Record<string, string | Record<string, unknown> | undefined> = {
     translator_name: translatorName,
     q: payload.text,
     from: payload.source_language ? toBackendLanguageCode(payload.source_language) : undefined,
     to: toBackendLanguageCode(payload.target_language),
-    params: {},
+    params: payload.params ?? {},
   }
 
   const response = await http.post<string | TranslationCompletion | { code: number; data: string | TranslationCompletion }>(

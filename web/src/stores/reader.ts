@@ -25,7 +25,7 @@ export const useReaderStore = defineStore('reader', {
     annotationWidth: 3,
     annotationCount: 0,
     noteCount: 0,
-    noteComments: [] as Array<{ id: string; page: number; text: string; quoteText?: string }>,
+    noteComments: [] as Array<{ id: string; page: number; text: string; quoteText?: string; translations?: Array<{ id: string; sourceText: string; translatedText: string }> }>,
     canUndo: false,
     canRedo: false,
     dirty: false,

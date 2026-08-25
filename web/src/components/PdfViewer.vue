@@ -5,7 +5,7 @@ import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument, rgb } from 'pdf-lib'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { useReaderStore } from '@/stores/reader'
-import type { PdfAnnotation, PdfPoint, PdfRect } from '@/types/pdf'
+import type { NoteTranslation, PdfAnnotation, PdfPoint, PdfRect } from '@/types/pdf'
 import { FUNPDF_EDITOR_STATE_FORMAT, FUNPDF_PROJECT_VERSION, type FunPdfEditorState } from '@/types/project'
 import { parseProjectText, type ProjectEditorState } from '@/utils/projectFile'
 import {
@@ -65,6 +65,12 @@ const translationPopup = ref({
   loading: false,
   left: 0,
   top: 0,
+  width: 270,
+  point: { x: 0, y: 0 } as PdfPoint,
+  quoteText: '',
+  quoteRects: [] as PdfRect[],
+  translator: '',
+  targetLanguage: '',
 })
 const noteEditor = ref({
   open: false,
@@ -74,8 +80,12 @@ const noteEditor = ref({
   text: '',
   quoteText: '',
   quoteRects: [] as PdfRect[],
+  translations: [] as NoteTranslation[],
   left: 0,
   top: 0,
+  dragging: false,
+  dragOffsetX: 0,
+  dragOffsetY: 0,
 })
 
 const pageElements = new Map<number, HTMLElement>()
@@ -104,6 +114,7 @@ let thumbnailGeneration = 0
 let cachedFileId = ''
 let cachedFileRevision = 0
 let cachedFileSha256 = ''
+let draggingMarker: { page: number; annotationId: string; pointerId: number; moved: boolean } | null = null
 
 function setMapElement<T extends Element>(map: Map<number, T>, page: number, element: unknown) {
   if (element instanceof Element) map.set(page, element as T)
@@ -138,6 +149,11 @@ function updateHistoryState() {
     page: note.page,
     text: note.text,
     quoteText: note.quoteText,
+    translations: note.translations?.map(item => ({
+      id: item.id,
+      sourceText: item.sourceText,
+      translatedText: item.translatedText,
+    })),
   }))
   renderRevision.value++
 }
@@ -711,15 +727,6 @@ function drawAnnotations(page: number) {
       context.lineTo(end.x, end.y)
       context.stroke()
     } else if (annotation.type === 'note') {
-      if (annotation.quoteRects?.length) {
-        context.globalAlpha = 0.16
-        for (const quoteRect of annotation.quoteRects) {
-          const start = viewportPoint(quoteRect.start, page)
-          const end = viewportPoint(quoteRect.end, page)
-          context.fillRect(Math.min(start.x, end.x), Math.min(start.y, end.y), Math.abs(end.x - start.x), Math.abs(end.y - start.y))
-        }
-        context.globalAlpha = 1
-      }
       const point = viewportPoint(annotation.point, page)
       context.beginPath()
       context.arc(point.x, point.y, 11, 0, Math.PI * 2)
@@ -728,7 +735,7 @@ function drawAnnotations(page: number) {
       context.font = 'bold 12px sans-serif'
       context.textAlign = 'center'
       context.textBaseline = 'middle'
-      context.fillText('!', point.x, point.y + 0.5)
+      context.fillText(annotation.translations?.length && !annotation.text ? '…' : '!', point.x, point.y + 0.5)
     }
     context.restore()
   }
@@ -855,7 +862,46 @@ function noteMarkers(page: number) {
   renderRevision.value
   return (annotations[page] ?? [])
     .filter(annotation => annotation.type === 'note')
-    .map(annotation => ({ annotation, point: viewportPoint(annotation.point, page) }))
+    .map(annotation => {
+      const point = viewportPoint(annotation.point, page)
+      const isTranslation = Boolean(annotation.translations?.length && !annotation.text)
+      return { annotation, point, label: isTranslation ? '...' : '!', isTranslation }
+    })
+}
+
+function moveAnnotationPoint(page: number, annotationId: string, local: PdfPoint) {
+  const annotation = annotationsForPage(page).find(item => item.id === annotationId)
+  if (annotation?.type !== 'note') return
+  annotation.point = pdfPoint(local, page)
+  store.dirty = true
+  updateHistoryState()
+  drawAnnotations(page)
+}
+
+function startMarkerDrag(event: PointerEvent, page: number, annotation: PdfAnnotation) {
+  if (annotation.type !== 'note') return
+  const target = event.currentTarget as HTMLElement
+  target.setPointerCapture(event.pointerId)
+  draggingMarker = { page, annotationId: annotation.id, pointerId: event.pointerId, moved: false }
+  pushHistory()
+}
+
+function moveMarkerDrag(event: PointerEvent, page: number) {
+  if (!draggingMarker || draggingMarker.page !== page || draggingMarker.pointerId !== event.pointerId) return
+  const local = localPointerPosition(event, page)
+  moveAnnotationPoint(page, draggingMarker.annotationId, local)
+  draggingMarker.moved = true
+}
+
+function endMarkerDrag(event: PointerEvent, page: number, annotation: PdfAnnotation) {
+  if (!draggingMarker || draggingMarker.page !== page || draggingMarker.pointerId !== event.pointerId) return
+  const target = event.currentTarget as HTMLElement
+  if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
+  const moved = draggingMarker.moved
+  draggingMarker = null
+  if (!moved) {
+    openNoteEditor(page, annotation.type === 'note' ? annotation.point : { x: 0, y: 0 }, viewportPoint(annotation.type === 'note' ? annotation.point : { x: 0, y: 0 }, page), annotation)
+  }
 }
 
 function openNoteEditor(page: number, point: PdfPoint, local: PdfPoint, annotation?: PdfAnnotation) {
@@ -876,8 +922,12 @@ function openNoteEditor(page: number, point: PdfPoint, local: PdfPoint, annotati
     text: annotation?.type === 'note' ? annotation.text : '',
     quoteText: annotation?.type === 'note' ? annotation.quoteText ?? '' : '',
     quoteRects: annotation?.type === 'note' ? annotation.quoteRects ?? [] : [],
+    translations: annotation?.type === 'note' ? annotation.translations ?? [] : [],
     left: Math.min(local.x + 16, Math.max((viewport?.width ?? 320) - 280, 8)),
     top: Math.min(local.y + 16, Math.max((viewport?.height ?? 220) - 190, 8)),
+    dragging: false,
+    dragOffsetX: 0,
+    dragOffsetY: 0,
   }
   nextTick(() => document.querySelector<HTMLTextAreaElement>('.note-editor textarea')?.focus())
 }
@@ -907,8 +957,12 @@ function openSelectedTextNoteEditor() {
     text: '',
     quoteText: textSelection.value.text,
     quoteRects: rects,
+    translations: [],
     left: Math.min(local.x + 16, Math.max((pageViewport(page)?.width ?? 320) - 280, 8)),
     top: Math.min(local.y + 16, Math.max((pageViewport(page)?.height ?? 220) - 190, 8)),
+    dragging: false,
+    dragOffsetX: 0,
+    dragOffsetY: 0,
   }
   clearTextSelection(true)
   nextTick(() => document.querySelector<HTMLTextAreaElement>('.note-editor textarea')?.focus())
@@ -922,6 +976,24 @@ async function translateSelectedText() {
 
   const translator = localStorage.getItem('funpdf.translator') || 'Baidu-Translator'
   const targetLanguage = localStorage.getItem('funpdf.targetLanguage') || 'zh-CN'
+  const sourceLanguage = localStorage.getItem('funpdf.sourceLanguage') || 'auto'
+  const modelType = localStorage.getItem('funpdf.baidu.modelType') || 'nmt'
+  const reference = localStorage.getItem('funpdf.baidu.reference') || ''
+  const quoteRects = textSelection.value.rects.map(clientRect => {
+    const rect = viewportRect(clientRect, page)
+    return {
+      start: pdfPoint({ x: rect.left, y: rect.top }, page),
+      end: pdfPoint({ x: rect.right, y: rect.bottom }, page),
+    }
+  })
+  const lastClientRect = textSelection.value.rects[textSelection.value.rects.length - 1]
+  const lastRect = viewportRect(lastClientRect, page)
+  const popupLeft = Math.min(Math.max(lastRect.right + 18, 8), Math.max(viewport.width - 286, 8))
+  const popupWidth = Math.max(Math.min(320, viewport.width - popupLeft - 8), 220)
+  const markerLocal = {
+    x: Math.min(Math.max(lastRect.right + 26, 22), viewport.width - 28),
+    y: Math.min(Math.max(lastRect.bottom + 5, 18), viewport.height - 18),
+  }
   translationPopup.value = {
     open: true,
     page,
@@ -929,14 +1001,24 @@ async function translateSelectedText() {
     result: '',
     error: '',
     loading: true,
-    left: Math.min(textSelection.value.left + 130, Math.max(viewport.width - 286, 8)),
-    top: Math.min(textSelection.value.top + 42, Math.max(viewport.height - 170, 8)),
+    left: popupLeft,
+    top: Math.min(Math.max(lastRect.top, 8), Math.max(viewport.height - 240, 8)),
+    width: popupWidth,
+    point: pdfPoint(markerLocal, page),
+    quoteText: sourceText,
+    quoteRects,
+    translator,
+    targetLanguage,
   }
 
   try {
     const response = await completeTranslation(translator, {
       text: sourceText,
+      source_language: sourceLanguage === 'auto' ? undefined : sourceLanguage,
       target_language: targetLanguage,
+      params: translator === 'Baidu-Translator'
+        ? { model_type: modelType, reference: reference.trim() || undefined }
+        : {},
     })
     translationPopup.value.result = response.translated_text
   } catch (requestError) {
@@ -946,16 +1028,50 @@ async function translateSelectedText() {
   }
 }
 
+function saveTranslationResult() {
+  const page = translationPopup.value.page
+  const translatedText = translationPopup.value.result.trim()
+  if (!page || !translatedText) return
+  const translation: NoteTranslation = {
+    id: makeId(),
+    sourceText: translationPopup.value.quoteText,
+    translatedText,
+    translator: translationPopup.value.translator,
+    targetLanguage: translationPopup.value.targetLanguage,
+    createdAt: new Date().toISOString(),
+  }
+  pushHistory()
+  annotationsForPage(page).push({
+    id: makeId(),
+    page,
+    type: 'note',
+    color: store.annotationColor,
+    width: 1,
+    point: translationPopup.value.point,
+    text: '',
+    quoteText: translation.sourceText,
+    quoteRects: translationPopup.value.quoteRects,
+    translations: [translation],
+  })
+  translationPopup.value.open = false
+  clearTextSelection(true)
+  updateHistoryState()
+  drawAnnotations(page)
+  setStatus('翻译已保存')
+}
+
 function saveNote() {
   const text = noteEditor.value.text.trim()
-  if (!text) { noteEditor.value.open = false; return }
+  if (!text && noteEditor.value.translations.length === 0) { noteEditor.value.open = false; return }
   const page = noteEditor.value.page
   pushHistory()
   const existing = annotationsForPage(page).find(annotation => annotation.id === noteEditor.value.annotationId)
   if (existing?.type === 'note') {
     existing.text = text
+    existing.point = noteEditor.value.point
     existing.quoteText = noteEditor.value.quoteText || undefined
     existing.quoteRects = noteEditor.value.quoteRects.length ? noteEditor.value.quoteRects : undefined
+    existing.translations = noteEditor.value.translations.length ? noteEditor.value.translations : undefined
   } else {
     annotationsForPage(page).push({
       id: makeId(),
@@ -967,11 +1083,43 @@ function saveNote() {
       text,
       quoteText: noteEditor.value.quoteText || undefined,
       quoteRects: noteEditor.value.quoteRects.length ? noteEditor.value.quoteRects : undefined,
+      translations: noteEditor.value.translations.length ? noteEditor.value.translations : undefined,
     })
   }
   noteEditor.value.open = false
   updateHistoryState()
   drawAnnotations(page)
+}
+
+function startNoteEditorDrag(event: PointerEvent) {
+  const viewport = pageViewport(noteEditor.value.page)
+  if (!viewport) return
+  const target = event.currentTarget as HTMLElement
+  target.setPointerCapture(event.pointerId)
+  noteEditor.value.dragging = true
+  noteEditor.value.dragOffsetX = event.offsetX
+  noteEditor.value.dragOffsetY = event.offsetY
+}
+
+function moveNoteEditorDrag(event: PointerEvent) {
+  if (!noteEditor.value.dragging) return
+  const viewport = pageViewport(noteEditor.value.page)
+  if (!viewport) return
+  const pageElement = pageElements.get(noteEditor.value.page)
+  const pageRect = pageElement?.getBoundingClientRect()
+  if (!pageRect) return
+  const left = Math.min(Math.max(event.clientX - pageRect.left - noteEditor.value.dragOffsetX, 8), Math.max(viewport.width - 280, 8))
+  const top = Math.min(Math.max(event.clientY - pageRect.top - noteEditor.value.dragOffsetY, 8), Math.max(viewport.height - 190, 8))
+  noteEditor.value.left = left
+  noteEditor.value.top = top
+  noteEditor.value.point = pdfPoint({ x: left, y: top }, noteEditor.value.page)
+}
+
+function endNoteEditorDrag(event: PointerEvent) {
+  if (!noteEditor.value.dragging) return
+  noteEditor.value.dragging = false
+  const target = event.currentTarget as HTMLElement
+  if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
 }
 
 function clearTextSelection(removeNative = false) {
@@ -1174,7 +1322,8 @@ async function buildFlattenedPdf() {
       } else if (annotation.type === 'underline' || annotation.type === 'strike') {
         page.drawLine({ start: annotation.start, end: annotation.end, thickness: Math.max(annotation.width, 0.5), color, opacity: 0.95 })
       } else if (annotation.type === 'note') {
-        const image = await createFlattenedNoteImage(output, annotation.text, annotation.color)
+        const flattenedText = annotation.text || annotation.translations?.map(item => item.translatedText).join('\n\n') || ''
+        const image = await createFlattenedNoteImage(output, flattenedText, annotation.color)
         const size = page.getSize()
         const width = Math.min(180, size.width)
         const height = width * image.height / image.width
@@ -1237,7 +1386,7 @@ async function saveProject(options: { quiet?: boolean; thumbnail?: string } = {}
       )
       cachedFileRevision = result.revision
       store.dirty = false
-      if (!options.quiet) setStatus(`编辑状态已保存到 Cache/${cachedFileId}（版本 ${cachedFileRevision}）`)
+      if (!options.quiet) setStatus('编辑状态已保存')
       return true
     }
 
@@ -1403,15 +1552,18 @@ onBeforeUnmount(() => {
             </template>
           </div>
 
-          <button
-            v-for="marker in noteMarkers(layout.pageNumber)"
-            :key="marker.annotation.id"
-            class="note-marker"
-            :style="{ left: `${marker.point.x}px`, top: `${marker.point.y}px`, backgroundColor: marker.annotation.color }"
-            title="打开便签"
-            @mousedown.stop
-            @click="openNoteEditor(layout.pageNumber, marker.annotation.point, marker.point, marker.annotation)"
-          >!</button>
+          <template v-for="marker in noteMarkers(layout.pageNumber)" :key="marker.annotation.id">
+            <button
+              class="note-marker"
+              :class="{ 'translation-marker': marker.isTranslation }"
+              :style="{ left: `${marker.point.x}px`, top: `${marker.point.y}px`, backgroundColor: marker.isTranslation ? '#eeeeee' : marker.annotation.color, borderColor: marker.isTranslation ? '#c9c9c9' : marker.annotation.color, color: marker.isTranslation ? '#4f555b' : '#ffffff' }"
+              title="打开便签"
+              @pointerdown.stop.prevent="startMarkerDrag($event, layout.pageNumber, marker.annotation)"
+              @pointermove.stop.prevent="moveMarkerDrag($event, layout.pageNumber)"
+              @pointerup.stop.prevent="endMarkerDrag($event, layout.pageNumber, marker.annotation)"
+              @pointercancel.stop.prevent="endMarkerDrag($event, layout.pageNumber, marker.annotation)"
+            >{{ marker.label }}</button>
+          </template>
 
           <div
             v-if="textSelection.open && textSelection.page === layout.pageNumber"
@@ -1429,7 +1581,7 @@ onBeforeUnmount(() => {
           <div
             v-if="translationPopup.open && translationPopup.page === layout.pageNumber"
             class="translation-popup"
-            :style="{ left: `${translationPopup.left}px`, top: `${translationPopup.top}px` }"
+            :style="{ left: `${translationPopup.left}px`, top: `${translationPopup.top}px`, width: `${translationPopup.width}px` }"
             @pointerdown.stop
           >
             <div class="translation-popup-header">
@@ -1442,19 +1594,38 @@ onBeforeUnmount(() => {
               <i class="fa-solid fa-circle-notch fa-spin"></i> 翻译中…
             </p>
             <p v-else-if="translationPopup.error" class="translation-error">{{ translationPopup.error }}</p>
-            <p v-else class="translation-result">{{ translationPopup.result }}</p>
+            <template v-else>
+              <p v-if="translationPopup.result" class="translation-result">{{ translationPopup.result }}</p>
+              <button v-if="translationPopup.result" class="save-translation-button" @click="saveTranslationResult">保存</button>
+            </template>
           </div>
 
           <div
             v-if="noteEditor.open && noteEditor.page === layout.pageNumber"
             class="note-editor"
             :style="{ left: `${noteEditor.left}px`, top: `${noteEditor.top}px` }"
+            @pointermove="moveNoteEditorDrag"
+            @pointerup="endNoteEditorDrag"
+            @pointercancel="endNoteEditorDrag"
             @pointerdown.stop
           >
-            <strong>{{ noteEditor.annotationId ? '编辑便签' : '添加便签' }}</strong>
+            <div class="note-editor-header" @pointerdown.stop.prevent="startNoteEditorDrag">
+              <strong>{{ noteEditor.annotationId ? '编辑便签' : '添加便签' }}</strong>
+              <i class="fa-solid fa-grip-lines"></i>
+            </div>
             <blockquote v-if="noteEditor.quoteText">{{ noteEditor.quoteText }}</blockquote>
-            <textarea v-model="noteEditor.text" maxlength="500" placeholder="输入备注内容…"></textarea>
-            <div><button class="secondary" @click="noteEditor.open = false">取消</button><button @click="saveNote">保存</button></div>
+            <section class="note-group">
+              <span>批注</span>
+              <textarea v-model="noteEditor.text" maxlength="500" placeholder="输入备注内容…"></textarea>
+            </section>
+            <section v-if="noteEditor.translations.length" class="note-group">
+              <span>翻译</span>
+              <article v-for="item in noteEditor.translations" :key="item.id" class="saved-translation">
+                <small>{{ item.translator }} · {{ item.targetLanguage }}</small>
+                <p>{{ item.translatedText }}</p>
+              </article>
+            </section>
+            <div class="note-editor-actions"><button class="secondary" @click="noteEditor.open = false">取消</button><button @click="saveNote">保存</button></div>
           </div>
         </article>
       </div>
@@ -1497,13 +1668,16 @@ onBeforeUnmount(() => {
 .page-shell[data-active-tool='cursor'] .pdf-link { pointer-events: auto; cursor: pointer; }
 .page-shell[data-active-tool='cursor'] .pdf-link:hover { outline: 1px solid rgb(75 85 99 / 35%); background: rgb(120 130 140 / 8%); }
 .pdf-link:focus-visible { outline: 2px solid #555b62; outline-offset: 1px; }
-.note-marker { position: absolute; z-index: 4; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 0; border-radius: 50%; color: white; font: 700 12px/22px sans-serif; box-shadow: 0 1px 3px rgb(0 0 0 / 22%); pointer-events: none; }
+.note-marker { position: absolute; z-index: 4; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 1px solid transparent; border-radius: 50%; color: white; font: 700 12px/20px sans-serif; box-shadow: 0 1px 3px rgb(0 0 0 / 22%); pointer-events: none; }
+.note-marker.translation-marker { width: 38px; height: 22px; border-radius: 5px; transform: translate(-50%, -50%); display: inline-grid; place-items: center; font: 700 13px/20px sans-serif; letter-spacing: 0; }
 .page-shell[data-active-tool='cursor'] .note-marker { pointer-events: auto; cursor: pointer; }
+.page-shell[data-active-tool='cursor'] .note-marker.translation-marker { cursor: grab; }
+.page-shell[data-active-tool='cursor'] .note-marker.translation-marker:active { cursor: grabbing; }
 .selection-toolbar { position: absolute; z-index: 6; transform: translateX(-50%); height: 36px; display: flex; align-items: center; padding: 3px; border: 1px solid #c8c8c8; border-radius: 7px; background: rgb(250 250 250 / 98%); box-shadow: 0 5px 16px rgb(0 0 0 / 18%); }
 .selection-toolbar button { height: 28px; padding: 0 9px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 5px; background: transparent; color: #3f4449; cursor: pointer; font-size: 12px; white-space: nowrap; }
 .selection-toolbar button:hover { background: #e8e8e8; }
 .selection-toolbar > span { width: 1px; height: 20px; background: #ddd; }
-.translation-popup { position: absolute; z-index: 7; width: 270px; max-height: 168px; overflow: hidden; padding: 10px 11px 11px; border: 1px solid #d8d8d8; border-radius: 9px; background: rgb(255 255 255 / 98%); box-shadow: 0 9px 24px rgb(0 0 0 / 18%); color: #3f4449; }
+.translation-popup { position: absolute; z-index: 7; max-height: 260px; overflow: auto; padding: 10px 11px 11px; border: 1px solid #d8d8d8; border-radius: 9px; background: rgb(255 255 255 / 98%); box-shadow: 0 9px 24px rgb(0 0 0 / 18%); color: #3f4449; box-sizing: border-box; }
 .translation-popup-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
 .translation-popup-header strong { font-size: 12px; color: #34383d; }
 .translation-popup-header button { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #777c81; cursor: pointer; }
@@ -1511,12 +1685,20 @@ onBeforeUnmount(() => {
 .translation-loading, .translation-error, .translation-result { margin: 0; font-size: 12px; line-height: 1.6; }
 .translation-loading { color: #6f757b; }
 .translation-error { color: #a33d3d; }
-.translation-result { max-height: 118px; overflow: auto; white-space: pre-wrap; }
+.translation-result { max-height: 170px; overflow: auto; white-space: pre-wrap; padding-right: 3px; }
+.save-translation-button { position: sticky; bottom: 0; margin-top: 8px; height: 28px; padding: 0 12px; border: 0; border-radius: 5px; background: #555b62; color: white; cursor: pointer; font-size: 12px; box-shadow: 0 -4px 10px rgb(255 255 255 / 84%); }
 .note-editor { position: absolute; z-index: 7; width: 260px; padding: 13px; border-radius: 10px; background: #fffdf5; border: 1px solid #ead99c; box-shadow: 0 10px 30px rgb(0 0 0 / 20%); }
-.note-editor strong { display: block; margin-bottom: 8px; color: #713f12; font-size: 13px; }
+.note-editor-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -3px -3px 8px; padding: 3px; cursor: move; color: #713f12; }
+.note-editor-header strong { display: block; color: #713f12; font-size: 13px; }
+.note-editor-header i { color: #b78a35; font-size: 12px; }
 .note-editor blockquote { max-height: 74px; overflow: auto; margin: 0 0 8px; padding: 7px 9px; border-left: 3px solid #d6b75d; border-radius: 5px; background: rgb(255 247 214 / 72%); color: #6b4e16; font-size: 12px; line-height: 1.45; }
+.note-group { display: grid; gap: 6px; margin-top: 8px; }
+.note-group > span { color: #8a6d21; font-size: 11px; font-weight: 700; }
 .note-editor textarea { width: 100%; height: 92px; resize: vertical; border: 1px solid #e4d6ad; border-radius: 6px; padding: 8px; outline: none; color: #422006; background: white; font-size: 13px; }
-.note-editor > div { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
+.saved-translation { padding: 8px; border: 1px solid #ead99c; border-radius: 6px; background: white; }
+.saved-translation small { display: block; margin-bottom: 5px; color: #9a7b34; font-size: 10px; }
+.saved-translation p { max-height: 90px; overflow: auto; margin: 0; color: #422006; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.note-editor-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
 .note-editor button { border: 0; border-radius: 6px; padding: 6px 11px; background: #6a5b48; color: white; cursor: pointer; font-size: 12px; }
 .note-editor button.secondary { background: transparent; color: #785b35; }
 .empty-state { margin: 13vh auto 0; text-align: center; color: #70757a; max-width: 500px; }

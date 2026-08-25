@@ -30,6 +30,15 @@ export interface PdfRect {
   end: PdfPoint
 }
 
+export interface NoteTranslation {
+  id: string
+  sourceText: string
+  translatedText: string
+  translator: string
+  targetLanguage: string
+  createdAt: string
+}
+
 interface AnnotationBase {
   id: string
   page: number
@@ -60,6 +69,7 @@ export interface NoteAnnotation extends AnnotationBase {
   text: string
   quoteText?: string
   quoteRects?: PdfRect[]
+  translations?: NoteTranslation[]
 }
 
 export type PdfAnnotation =
