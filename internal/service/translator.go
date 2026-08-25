@@ -1,0 +1,88 @@
+package service
+
+import (
+	"FunPDF/internal/dao"
+	"FunPDF/internal/dto"
+	"FunPDF/internal/engine"
+	"FunPDF/internal/entity"
+	"context"
+	"database/sql"
+	"errors"
+	"strings"
+)
+
+type TranslatorService struct {
+	translatorDAO *dao.TranslatorDAO
+	translatorFct *engine.TranslatorFactory
+}
+
+func NewTranslatorService() TranslatorService {
+	return TranslatorService{dao.NewTranslatorDAO(), engine.NewTranslatorFactory()}
+}
+
+// ListTranslators list all translators
+func (s *TranslatorService) ListTranslators(ctx context.Context) ([]*entity.Translator, error) {
+	list, err := s.translatorDAO.ListTranslators(ctx, dao.DB)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return []*entity.Translator{}, nil
+		}
+		return nil, err
+	}
+	return list, nil
+}
+
+// CreateTranslator create a unique translator
+func (s *TranslatorService) CreateTranslator(ctx context.Context, req *dto.CreateTranslatorsRequest) (*entity.Translator, error) {
+	translatorName := strings.TrimSpace(req.Name)
+	if translatorName == "" {
+		return nil, errors.New("translator name is required")
+	}
+
+	if len(req.Params) == 0 {
+		return nil, errors.New("translator params is required")
+	}
+
+	translator, err := s.translatorDAO.CreateTranslator(ctx, dao.DB, translatorName, req.Params)
+	if err != nil {
+		return nil, err
+	}
+	return translator, nil
+}
+
+// Translate source to dst language
+func (s *TranslatorService) Translate(ctx context.Context, req *dto.TranslateRequest, translatorName string) (string, error) {
+	var from, to, query string
+	if req.From == nil || strings.TrimSpace(*req.From) == "" {
+		from = "auto"
+	} else {
+		from = strings.TrimSpace(*req.From)
+	}
+	if req.To == nil || strings.TrimSpace(*req.To) == "" {
+		to = "zh"
+	} else {
+		to = strings.TrimSpace(*req.To)
+	}
+
+	if req.Q == nil {
+		return "", nil
+	}
+	query = strings.TrimSpace(*req.Q)
+	if query == "" {
+		return "", nil
+	}
+
+	translator, err := s.translatorFct.GetTranslator(ctx, dao.DB, translatorName)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errors.New("translator not found")
+		}
+		return "", err
+	}
+
+	result, err := translator.Translate(ctx, from, to, query, req.Params)
+	if err != nil {
+		return "", err
+	}
+	return result, nil
+}
