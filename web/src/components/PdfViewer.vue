@@ -16,6 +16,7 @@ import {
   type CachedFile,
 } from '@/api/files'
 import { apiErrorMessage } from '@/api/http'
+import { completeTranslation } from '@/api/translators'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfWorker
 
@@ -55,6 +56,16 @@ const dragActive = ref(false)
 const rotation = ref(0)
 const renderRevision = ref(0)
 const textSelection = ref({ open: false, page: 0, text: '', rects: [] as DOMRect[], left: 0, top: 0 })
+const translationPopup = ref({
+  open: false,
+  page: 0,
+  sourceText: '',
+  result: '',
+  error: '',
+  loading: false,
+  left: 0,
+  top: 0,
+})
 const noteEditor = ref({
   open: false,
   page: 0,
@@ -903,6 +914,38 @@ function openSelectedTextNoteEditor() {
   nextTick(() => document.querySelector<HTMLTextAreaElement>('.note-editor textarea')?.focus())
 }
 
+async function translateSelectedText() {
+  const page = textSelection.value.page
+  const sourceText = textSelection.value.text.trim()
+  const viewport = pageViewport(page)
+  if (!page || !viewport || !sourceText) return
+
+  const translator = localStorage.getItem('funpdf.translator') || 'Baidu-Translator'
+  const targetLanguage = localStorage.getItem('funpdf.targetLanguage') || 'zh-CN'
+  translationPopup.value = {
+    open: true,
+    page,
+    sourceText,
+    result: '',
+    error: '',
+    loading: true,
+    left: Math.min(textSelection.value.left + 130, Math.max(viewport.width - 286, 8)),
+    top: Math.min(textSelection.value.top + 42, Math.max(viewport.height - 170, 8)),
+  }
+
+  try {
+    const response = await completeTranslation(translator, {
+      text: sourceText,
+      target_language: targetLanguage,
+    })
+    translationPopup.value.result = response.translated_text
+  } catch (requestError) {
+    translationPopup.value.error = apiErrorMessage(requestError, '翻译失败')
+  } finally {
+    translationPopup.value.loading = false
+  }
+}
+
 function saveNote() {
   const text = noteEditor.value.text.trim()
   if (!text) { noteEditor.value.open = false; return }
@@ -1380,6 +1423,26 @@ onBeforeUnmount(() => {
             <span></span>
             <button @click="highlightSelectedText"><i class="fa-solid fa-highlighter"></i>高亮</button>
             <button @click="openSelectedTextNoteEditor"><i class="fa-regular fa-note-sticky"></i>便签</button>
+            <button @click="translateSelectedText"><i class="fa-solid fa-language"></i>翻译</button>
+          </div>
+
+          <div
+            v-if="translationPopup.open && translationPopup.page === layout.pageNumber"
+            class="translation-popup"
+            :style="{ left: `${translationPopup.left}px`, top: `${translationPopup.top}px` }"
+            @pointerdown.stop
+          >
+            <div class="translation-popup-header">
+              <strong>翻译</strong>
+              <button title="关闭" @click="translationPopup.open = false">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <p v-if="translationPopup.loading" class="translation-loading">
+              <i class="fa-solid fa-circle-notch fa-spin"></i> 翻译中…
+            </p>
+            <p v-else-if="translationPopup.error" class="translation-error">{{ translationPopup.error }}</p>
+            <p v-else class="translation-result">{{ translationPopup.result }}</p>
           </div>
 
           <div
@@ -1440,6 +1503,15 @@ onBeforeUnmount(() => {
 .selection-toolbar button { height: 28px; padding: 0 9px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 5px; background: transparent; color: #3f4449; cursor: pointer; font-size: 12px; white-space: nowrap; }
 .selection-toolbar button:hover { background: #e8e8e8; }
 .selection-toolbar > span { width: 1px; height: 20px; background: #ddd; }
+.translation-popup { position: absolute; z-index: 7; width: 270px; max-height: 168px; overflow: hidden; padding: 10px 11px 11px; border: 1px solid #d8d8d8; border-radius: 9px; background: rgb(255 255 255 / 98%); box-shadow: 0 9px 24px rgb(0 0 0 / 18%); color: #3f4449; }
+.translation-popup-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.translation-popup-header strong { font-size: 12px; color: #34383d; }
+.translation-popup-header button { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #777c81; cursor: pointer; }
+.translation-popup-header button:hover { background: #ececec; color: #3f4449; }
+.translation-loading, .translation-error, .translation-result { margin: 0; font-size: 12px; line-height: 1.6; }
+.translation-loading { color: #6f757b; }
+.translation-error { color: #a33d3d; }
+.translation-result { max-height: 118px; overflow: auto; white-space: pre-wrap; }
 .note-editor { position: absolute; z-index: 7; width: 260px; padding: 13px; border-radius: 10px; background: #fffdf5; border: 1px solid #ead99c; box-shadow: 0 10px 30px rgb(0 0 0 / 20%); }
 .note-editor strong { display: block; margin-bottom: 8px; color: #713f12; font-size: 13px; }
 .note-editor blockquote { max-height: 74px; overflow: auto; margin: 0 0 8px; padding: 7px 9px; border-left: 3px solid #d6b75d; border-radius: 5px; background: rgb(255 247 214 / 72%); color: #6b4e16; font-size: 12px; line-height: 1.45; }
