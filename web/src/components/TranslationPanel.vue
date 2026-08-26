@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { apiErrorMessage } from '@/api/http'
-import { completeTranslation, createTranslator, listTranslators, type Translator } from '@/api/translators'
+import { completeTranslation, createTranslator, listTranslators, normalizeTranslatorName, type Translator } from '@/api/translators'
 import { useReaderStore } from '@/stores/reader'
 
-type TranslatorType = 'Baidu-Translator' | 'Deepl-Translator' | 'Google-Translator'
+type TranslatorType = 'baidu' | 'deepl' | 'google'
 
 const translatorTypes: Array<{ name: TranslatorType; label: string }> = [
-  { name: 'Baidu-Translator', label: 'Baidu Translator' },
-  { name: 'Deepl-Translator', label: 'DeepL Translator' },
-  { name: 'Google-Translator', label: 'Google Translator' },
+  { name: 'baidu', label: 'Baidu Translator' },
+  { name: 'deepl', label: 'DeepL Translator' },
+  { name: 'google', label: 'Google Translator' },
 ]
 
 const store = useReaderStore()
 const translators = ref<Translator[]>([])
-const translator = ref(localStorage.getItem('funpdf.translator') || '')
-const translatorType = ref<TranslatorType>('Baidu-Translator')
+const translator = ref(normalizeTranslatorName(localStorage.getItem('funpdf.translator') || ''))
+const translatorType = ref<TranslatorType>('baidu')
 const credentialDraft = ref<Record<string, string>>({})
 const sourceLanguage = ref(localStorage.getItem('funpdf.sourceLanguage') || 'auto')
 const targetLanguage = ref(localStorage.getItem('funpdf.targetLanguage') || 'zh-CN')
@@ -25,6 +25,7 @@ const deeplRegion = ref(localStorage.getItem('funpdf.deepl.region') || 'free')
 const deeplModelType = ref(localStorage.getItem('funpdf.deepl.modelType') || 'prefer_quality_optimized')
 const deeplFormality = ref(localStorage.getItem('funpdf.deepl.formality') || 'default')
 const deeplPreserveFormatting = ref(localStorage.getItem('funpdf.deepl.preserveFormatting') === 'true')
+const googleFormat = ref(localStorage.getItem('funpdf.google.format') || 'text')
 const result = ref('')
 const loading = ref(false)
 const configLoading = ref(false)
@@ -32,26 +33,28 @@ const error = ref('')
 const configError = ref('')
 const configMessage = ref('')
 
-const configuredNames = computed(() => new Set(translators.value.map(item => item.name)))
+const configuredNames = computed(() => new Set(translators.value.map(item => normalizeTranslatorName(item.name))))
 const unconfiguredTypes = computed(() => translatorTypes.filter(item => !configuredNames.value.has(item.name)))
-const currentTranslator = computed(() => translators.value.find(item => item.name === translator.value))
-const currentTranslatorType = computed(() => currentTranslator.value?.name as TranslatorType | undefined)
+const configuredTranslatorTypes = computed(() => translatorTypes.filter(item => configuredNames.value.has(item.name)))
+const currentTranslator = computed(() => translators.value.find(item => normalizeTranslatorName(item.name) === translator.value))
+const currentTranslatorType = computed(() => currentTranslator.value ? normalizeTranslatorName(currentTranslator.value.name) as TranslatorType : undefined)
 
 function fieldsFor(type: TranslatorType) {
-  if (type === 'Baidu-Translator') return [
+  if (type === 'baidu') return [
     { key: 'api_key', label: 'Baidu API Key', type: 'password', placeholder: '百度翻译 API Key' },
     { key: 'app_id', label: 'Baidu APP ID', type: 'text', placeholder: '百度翻译 APP ID' },
   ]
-  if (type === 'Deepl-Translator') return [
+  if (type === 'deepl') return [
     { key: 'api_key', label: 'DeepL API Key', type: 'password', placeholder: 'DeepL API Key' },
   ]
-  return [
-    { key: 'api_key', label: 'Google API Key', type: 'password', placeholder: 'Google Translate API Key' },
-    { key: 'project_id', label: 'Google Project ID', type: 'text', placeholder: 'Google Cloud Project ID' },
+  if (type === 'google') return [
+    { key: 'api_key', label: 'Google API Key', type: 'password', placeholder: 'Google Cloud Translation API Key' },
   ]
+  return []
 }
 
 function persistTranslator() {
+  translator.value = normalizeTranslatorName(translator.value)
   if (translator.value) localStorage.setItem('funpdf.translator', translator.value)
 }
 
@@ -64,6 +67,7 @@ function persistRuntimeConfig() {
   localStorage.setItem('funpdf.deepl.modelType', deeplModelType.value)
   localStorage.setItem('funpdf.deepl.formality', deeplFormality.value)
   localStorage.setItem('funpdf.deepl.preserveFormatting', String(deeplPreserveFormatting.value))
+  localStorage.setItem('funpdf.google.format', googleFormat.value)
 }
 
 function resetCredentialDraft() {
@@ -76,11 +80,11 @@ async function refreshTranslators() {
   configError.value = ''
   try {
     translators.value = await listTranslators()
-    if (!translators.value.some(item => item.name === translator.value)) {
-      translator.value = translators.value[0]?.name ?? ''
+    if (!translators.value.some(item => normalizeTranslatorName(item.name) === translator.value)) {
+      translator.value = normalizeTranslatorName(translators.value[0]?.name ?? '')
       persistTranslator()
     }
-    translatorType.value = unconfiguredTypes.value[0]?.name ?? 'Baidu-Translator'
+    translatorType.value = unconfiguredTypes.value[0]?.name ?? 'baidu'
   } catch (requestError) {
     configError.value = apiErrorMessage(requestError, '无法读取翻译器列表')
   }
@@ -116,7 +120,7 @@ async function saveTranslatorConfig() {
 
 function runtimeOptions() {
   persistRuntimeConfig()
-  if (currentTranslatorType.value === 'Baidu-Translator') {
+  if (currentTranslatorType.value === 'baidu') {
     return {
       params: {
         model_type: modelType.value,
@@ -124,13 +128,20 @@ function runtimeOptions() {
       },
     }
   }
-  if (currentTranslatorType.value === 'Deepl-Translator') {
+  if (currentTranslatorType.value === 'deepl') {
     return {
       region: deeplRegion.value,
       params: {
         model_type: deeplModelType.value,
         formality: deeplFormality.value,
         preserve_formatting: deeplPreserveFormatting.value,
+      },
+    }
+  }
+  if (currentTranslatorType.value === 'google') {
+    return {
+      params: {
+        format: googleFormat.value,
       },
     }
   }
@@ -156,7 +167,7 @@ async function translate() {
 }
 
 watch(translator, persistTranslator)
-watch([sourceLanguage, targetLanguage, modelType, reference, deeplRegion, deeplModelType, deeplFormality, deeplPreserveFormatting], persistRuntimeConfig)
+watch([sourceLanguage, targetLanguage, modelType, reference, deeplRegion, deeplModelType, deeplFormality, deeplPreserveFormatting, googleFormat], persistRuntimeConfig)
 onMounted(() => void refreshTranslators())
 </script>
 
@@ -172,8 +183,8 @@ onMounted(() => void refreshTranslators())
 
       <label>
         当前使用
-        <select v-if="translators.length" v-model="translator">
-          <option v-for="item in translators" :key="item.id || item.name" :value="item.name">{{ item.name }}</option>
+        <select v-if="configuredTranslatorTypes.length" v-model="translator">
+          <option v-for="item in configuredTranslatorTypes" :key="item.name" :value="item.name">{{ item.label }}</option>
         </select>
         <div v-else class="empty-inline">数据库里还没有翻译器</div>
       </label>
@@ -210,15 +221,18 @@ onMounted(() => void refreshTranslators())
       <div class="section-title"><strong>局内配置</strong></div>
       <label>源语言<select v-model="sourceLanguage"><option value="auto">自动检测</option><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="es">Español</option><option value="fr">Français</option><option value="it">Italiano</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
       <label>目标语言<select v-model="targetLanguage"><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="es">Español</option><option value="fr">Français</option><option value="it">Italiano</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
-      <template v-if="currentTranslatorType === 'Baidu-Translator'">
+      <template v-if="currentTranslatorType === 'baidu'">
         <label>模型<select v-model="modelType"><option value="nmt">nmt</option><option value="llm">llm</option></select></label>
         <label>参考信息<textarea v-model="reference" maxlength="2000" placeholder="可选。按百度文档用于提供术语、上下文或参考译文。"></textarea></label>
       </template>
-      <template v-else-if="currentTranslatorType === 'Deepl-Translator'">
+      <template v-else-if="currentTranslatorType === 'deepl'">
         <label>区域<select v-model="deeplRegion"><option value="free">Free</option><option value="pro">Pro</option></select></label>
         <label>模型<select v-model="deeplModelType"><option value="prefer_quality_optimized">prefer_quality_optimized</option><option value="quality_optimized">quality_optimized</option><option value="latency_optimized">latency_optimized</option></select></label>
         <label>语气<select v-model="deeplFormality"><option value="default">default</option><option value="more">more</option><option value="less">less</option><option value="prefer_more">prefer_more</option><option value="prefer_less">prefer_less</option></select></label>
         <label class="checkbox-label"><input v-model="deeplPreserveFormatting" type="checkbox" /> 保留格式</label>
+      </template>
+      <template v-else-if="currentTranslatorType === 'google'">
+        <label>格式<select v-model="googleFormat"><option value="text">text</option><option value="html">html</option></select></label>
       </template>
     </section>
 

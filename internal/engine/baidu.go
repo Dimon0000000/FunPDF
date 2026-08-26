@@ -13,9 +13,7 @@ import (
 	"time"
 )
 
-const (
-	BaiduTranslatorAPIReference = "https://fanyi-api.baidu.com/doc/21"
-)
+const BaiduTranslatorAPIReference = "https://fanyi-api.baidu.com/doc/21"
 
 type BaiduTranslator struct {
 	APIKey     string `json:"api_key"`
@@ -139,6 +137,6 @@ func (b *BaiduTranslator) Healthy(ctx context.Context) bool {
 }
 
 // Name baidu
-func (b *BaiduTranslator) Name(ctx context.Context) string {
+func (b *BaiduTranslator) Name() string {
 	return "baidu"
 }
