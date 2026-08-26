@@ -34,7 +34,7 @@ func NewDeeplTranslator(apiKey, url string) *DeeplTranslator {
 		APIKey: apiKey,
 		URL:    url,
 		httpClient: &http.Client{
-			Timeout: time.Minute * 15,
+			Timeout: time.Second * 15,
 		},
 	}
 }
