@@ -1,0 +1,6 @@
+{
+  "name": "baidu",
+  "url": {
+    "default": "https://fanyi-api.baidu.com/ait/api/aiTextTranslate"
+  }
+}
