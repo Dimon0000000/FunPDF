@@ -42,11 +42,33 @@ type LocalFileHandle = {
   getFile(): Promise<File>
 }
 type OpenFilePicker = (options: Record<string, unknown>) => Promise<LocalFileHandle[]>
+type OpenDocumentTab = {
+  id: string
+  name: string
+  bytes: Uint8Array
+  annotations: AnnotationMap
+  undoStack: AnnotationMap[]
+  redoStack: AnnotationMap[]
+  rotation: number
+  scale: number
+  currentPage: number
+  totalPages: number
+  dirty: boolean
+  cachedFileId: string
+  cachedFileRevision: number
+  cachedFileSha256: string
+  saving: boolean
+  autosaveTimer: number
+}
+
+const AUTOSAVE_INTERVAL_MS = 30_000
 
 const store = useReaderStore()
 const stageRef = ref<HTMLElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const pdfDocument = shallowRef<PDFDocumentProxy | null>(null)
+const openTabs = ref<OpenDocumentTab[]>([])
+const activeTabId = ref('')
 const pageLayouts = ref<PageLayout[]>([])
 const pageLinks = ref<Record<number, PageLink[]>>({})
 const loading = ref(false)
@@ -177,6 +199,159 @@ function setStatus(message: string) {
   }, 3200)
 }
 
+function activeTab() {
+  return openTabs.value.find(tab => tab.id === activeTabId.value)
+}
+
+function cloneHistoryStack(stack: AnnotationMap[]) {
+  return stack.map(item => cloneAnnotations(item))
+}
+
+function buildEditorStateFrom(tab: OpenDocumentTab): FunPdfEditorState {
+  return {
+    format: FUNPDF_EDITOR_STATE_FORMAT,
+    version: FUNPDF_PROJECT_VERSION,
+    saved_at: new Date().toISOString(),
+    source: {
+      name: tab.name,
+      mime_type: 'application/pdf',
+      sha256: tab.cachedFileSha256 || undefined,
+    },
+    editor: {
+      annotations: cloneAnnotations(tab.annotations),
+      rotation: tab.rotation,
+      scale: tab.scale,
+      current_page: tab.currentPage,
+    },
+  }
+}
+
+function snapshotActiveTab() {
+  const tab = activeTab()
+  if (!tab || !originalBytes) return
+  tab.name = store.documentName
+  tab.bytes = originalBytes
+  tab.annotations = cloneAnnotations()
+  tab.undoStack = cloneHistoryStack(undoStack)
+  tab.redoStack = cloneHistoryStack(redoStack)
+  tab.rotation = rotation.value
+  tab.scale = store.scale
+  tab.currentPage = store.currentPage
+  tab.totalPages = store.totalPages
+  tab.dirty = store.dirty
+  tab.cachedFileId = cachedFileId
+  tab.cachedFileRevision = cachedFileRevision
+  tab.cachedFileSha256 = cachedFileSha256
+}
+
+function createTab(name: string, bytes: Uint8Array) {
+  const tab: OpenDocumentTab = {
+    id: makeId(),
+    name,
+    bytes,
+    annotations: cloneAnnotations(),
+    undoStack: cloneHistoryStack(undoStack),
+    redoStack: cloneHistoryStack(redoStack),
+    rotation: rotation.value,
+    scale: store.scale,
+    currentPage: store.currentPage,
+    totalPages: store.totalPages,
+    dirty: store.dirty,
+    cachedFileId,
+    cachedFileRevision,
+    cachedFileSha256,
+    saving: false,
+    autosaveTimer: 0,
+  }
+  openTabs.value.push(tab)
+  activeTabId.value = tab.id
+  if (tab.cachedFileId) startAutosave(tab)
+  return tab
+}
+
+function startAutosave(tab: OpenDocumentTab) {
+  stopAutosave(tab)
+  tab.autosaveTimer = window.setInterval(() => void autosaveTab(tab.id), AUTOSAVE_INTERVAL_MS)
+}
+
+function stopAutosave(tab: OpenDocumentTab) {
+  if (!tab.autosaveTimer) return
+  window.clearInterval(tab.autosaveTimer)
+  tab.autosaveTimer = 0
+}
+
+async function autosaveTab(tabId: string) {
+  if (tabId === activeTabId.value) {
+    if (saving.value || exporting.value || !originalBytes) return
+    if (cachedFileId && !store.dirty) return
+    await saveProject({ quiet: true })
+    snapshotActiveTab()
+    return
+  }
+
+  const tab = openTabs.value.find(item => item.id === tabId)
+  if (!tab || tab.saving) return
+  if (tab.cachedFileId && !tab.dirty) return
+  if (!tab.cachedFileId) return
+  tab.saving = true
+  try {
+    const state = buildEditorStateFrom(tab)
+    if (tab.cachedFileId) {
+      const result = await saveEditorState(tab.cachedFileId, tab.cachedFileRevision, state)
+      tab.cachedFileRevision = result.revision
+    }
+    tab.dirty = false
+  } catch (error) {
+    console.error(error)
+  } finally {
+    tab.saving = false
+  }
+}
+
+async function activateTab(tabId: string) {
+  if (tabId === activeTabId.value || loading.value || saving.value || exporting.value) return
+  const tab = openTabs.value.find(item => item.id === tabId)
+  if (!tab) return
+  snapshotActiveTab()
+  activeTabId.value = tab.id
+  loading.value = true
+  clearTextSelection(true)
+  try {
+    await openPdfBytes(tab.bytes, tab.name, {
+      annotations: tab.annotations,
+      rotation: tab.rotation,
+      scale: tab.scale,
+      currentPage: tab.currentPage,
+    })
+    undoStack = cloneHistoryStack(tab.undoStack)
+    redoStack = cloneHistoryStack(tab.redoStack)
+    cachedFileId = tab.cachedFileId
+    cachedFileRevision = tab.cachedFileRevision
+    cachedFileSha256 = tab.cachedFileSha256
+    store.dirty = tab.dirty
+    updateHistoryState()
+  } catch (error) {
+    console.error(error)
+    setStatus('无法切换到该 PDF')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function closeTab(tabId: string) {
+  if (tabId === activeTabId.value) {
+    await closeDocument()
+    return
+  }
+
+  const tab = openTabs.value.find(item => item.id === tabId)
+  if (!tab) return
+  if (!tab.cachedFileId && tab.dirty && !window.confirm('当前文档尚未保存，确定关闭吗？')) return
+  if (tab.cachedFileId && tab.dirty) await autosaveTab(tab.id)
+  stopAutosave(tab)
+  openTabs.value = openTabs.value.filter(item => item.id !== tab.id)
+}
+
 async function openFileDialog() {
   const picker = (window as Window & { showOpenFilePicker?: OpenFilePicker }).showOpenFilePicker
   if (!picker) {
@@ -218,8 +393,7 @@ async function loadFile(file: File) {
     return
   }
 
-  if (originalBytes && !await closeDocument()) return
-
+  snapshotActiveTab()
   loading.value = true
   clearTextSelection(true)
   try {
@@ -234,12 +408,15 @@ async function loadFile(file: File) {
         scale: project.editor.scale,
         currentPage: project.editor.current_page,
       })
+      createTab(project.document.name, pdfBytes)
       setStatus(`已打开可编辑工程 ${file.name}`)
     } else {
       cachedFileId = ''
       cachedFileRevision = 0
       cachedFileSha256 = ''
-      await openPdfBytes(new Uint8Array(await file.arrayBuffer()), file.name)
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      await openPdfBytes(bytes, file.name)
+      createTab(file.name, bytes)
       setStatus(`已打开 ${file.name}；按 Ctrl+S 存入本地文件库`)
     }
   } catch (error) {
@@ -251,7 +428,12 @@ async function loadFile(file: File) {
 }
 
 async function openCachedFile(file: CachedFile) {
-  if (originalBytes && !await closeDocument()) return
+  const opened = openTabs.value.find(tab => tab.cachedFileId === file.id)
+  if (opened) {
+    await activateTab(opened.id)
+    return
+  }
+  snapshotActiveTab()
   loading.value = true
   clearTextSelection(true)
   try {
@@ -259,7 +441,8 @@ async function openCachedFile(file: CachedFile) {
       getCachedFileContent(file.id),
       getCachedEditorState(file.id),
     ])
-    await openPdfBytes(new Uint8Array(content), file.name, {
+    const bytes = new Uint8Array(content)
+    await openPdfBytes(bytes, file.name, {
       annotations: state.editor.annotations,
       rotation: state.editor.rotation,
       scale: state.editor.scale,
@@ -268,6 +451,7 @@ async function openCachedFile(file: CachedFile) {
     cachedFileId = file.id
     cachedFileRevision = file.revision
     cachedFileSha256 = file.sha256
+    createTab(file.name, bytes)
     setStatus(`已从公共文件区打开 ${file.name}`)
   } catch (error) {
     console.error(error)
@@ -371,6 +555,7 @@ function resetOpenedDocument() {
 
 async function closeDocument() {
   if (!originalBytes || saving.value || exporting.value) return !originalBytes
+  const closingTab = activeTab()
   if (cachedFileId) {
     try {
       const thumbnail = await generateDocumentThumbnail()
@@ -384,7 +569,22 @@ async function closeDocument() {
   } else if (store.dirty && !window.confirm('当前文档尚未保存，确定关闭吗？')) {
     return false
   }
+
+  if (closingTab) {
+    stopAutosave(closingTab)
+    const closedIndex = openTabs.value.findIndex(tab => tab.id === closingTab.id)
+    openTabs.value = openTabs.value.filter(tab => tab.id !== closingTab.id)
+    const nextTab = openTabs.value[Math.max(0, Math.min(closedIndex, openTabs.value.length - 1))]
+    if (nextTab) {
+      resetOpenedDocument()
+      activeTabId.value = ''
+      await activateTab(nextTab.id)
+      return true
+    }
+  }
+
   resetOpenedDocument()
+  activeTabId.value = ''
   return true
 }
 
@@ -1396,7 +1596,7 @@ async function saveProject(options: { quiet?: boolean; thumbnail?: string } = {}
       )
       cachedFileRevision = result.revision
       store.dirty = false
-      if (!options.quiet) setStatus('编辑状态已保存')
+      snapshotActiveTab()
       return true
     }
 
@@ -1408,8 +1608,10 @@ async function saveProject(options: { quiet?: boolean; thumbnail?: string } = {}
     cachedFileRevision = cached.revision
     cachedFileSha256 = cached.sha256
     store.dirty = false
+    snapshotActiveTab()
+    const tab = activeTab()
+    if (tab && !tab.autosaveTimer) startAutosave(tab)
     window.dispatchEvent(new Event('funpdf:files-changed'))
-    if (!options.quiet) setStatus(`已存入本地文件库：Cache/${cached.id}`)
     return true
   } catch (error: any) {
     if (error?.name !== 'AbortError') {
@@ -1458,7 +1660,8 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
-  if (!store.dirty) return
+  snapshotActiveTab()
+  if (!store.dirty && !openTabs.value.some(tab => tab.dirty)) return
   event.preventDefault()
   event.returnValue = ''
 }
@@ -1466,6 +1669,10 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 defineExpose({ openFileDialog, closeDocument, rotate, fitWidth, undo, redo, clearAnnotations, saveProject, exportPdf, printPdf })
 
 watch(() => store.scale, () => void refreshPageFlow(true))
+watch(() => store.dirty, dirty => {
+  const tab = activeTab()
+  if (tab) tab.dirty = dirty
+})
 watch(() => store.currentPage, page => {
   if (pageChangeCameFromScroll) { pageChangeCameFromScroll = false; return }
   const normalized = Math.min(Math.max(Math.round(page || 1), 1), Math.max(store.totalPages, 1))
@@ -1490,6 +1697,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   document.removeEventListener('selectionchange', handleSelectionChange)
   window.removeEventListener('funpdf:open-cached-file', handleOpenCachedFile)
+  openTabs.value.forEach(stopAutosave)
   pageObserver?.disconnect()
   if (scrollFrame) cancelAnimationFrame(scrollFrame)
   cancelPageRendering()
@@ -1499,6 +1707,28 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="viewer">
+    <nav v-if="openTabs.length" class="document-tabs" aria-label="打开的 PDF">
+      <button
+        v-for="tab in openTabs"
+        :key="tab.id"
+        class="document-tab"
+        :class="{ active: tab.id === activeTabId }"
+        :title="tab.name"
+        @click="activateTab(tab.id)"
+      >
+        <i class="fa-regular fa-file-pdf"></i>
+        <span>{{ tab.id === activeTabId && store.dirty ? '● ' : tab.dirty ? '● ' : '' }}{{ tab.name }}</span>
+        <em v-if="tab.saving || (tab.id === activeTabId && saving)">
+          <i class="fa-solid fa-circle-notch fa-spin"></i>
+        </em>
+        <i
+          v-else
+          class="fa-solid fa-xmark close-tab"
+          title="关闭"
+          @click.stop="closeTab(tab.id)"
+        ></i>
+      </button>
+    </nav>
     <input ref="fileInputRef" class="hidden-input" type="file" accept="application/pdf,.pdf,.funpdf" @change="handleFileChange" />
     <div
       ref="stageRef"
@@ -1656,6 +1886,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .viewer { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; position: relative; background: #e9e9e9; }
+.document-tabs { height: 36px; flex: 0 0 36px; display: flex; align-items: flex-end; gap: 2px; padding: 5px 8px 0; overflow-x: auto; overflow-y: hidden; background: #f2f2f2; border-bottom: 1px solid #d9d9d9; }
+.document-tab { max-width: 220px; min-width: 108px; height: 31px; padding: 0 8px; display: flex; align-items: center; gap: 7px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; color: #5d6369; cursor: pointer; font-size: 12px; }
+.document-tab:hover { background: #e8e8e8; }
+.document-tab.active { background: #e9e9e9; color: #2f3439; border-color: #d9d9d9; }
+.document-tab span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.document-tab em, .close-tab { width: 18px; height: 18px; flex: 0 0 18px; display: grid; place-items: center; border-radius: 5px; font-style: normal; font-size: 11px; }
+.close-tab:hover { background: #d9d9d9; color: #22272c; }
 .hidden-input { display: none; }
 .page-stage { flex: 1; min-height: 0; overflow: auto; position: relative; padding: 28px 42px 84px; scroll-behavior: auto; }
 .page-flow { width: max-content; min-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 16px; }
