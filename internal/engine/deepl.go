@@ -148,6 +148,6 @@ func (d *DeeplTranslator) Healthy(ctx context.Context) bool {
 	return err == nil
 }
 
-func (d *DeeplTranslator) Name(ctx context.Context) string {
+func (d *DeeplTranslator) Name() string {
 	return "deepl"
 }

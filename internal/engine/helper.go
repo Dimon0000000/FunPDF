@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -18,4 +19,26 @@ func loadTranslatorConfig(name string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 	return data, nil
+}
+
+func translatorConfigURL(translatorName, region string) (string, error) {
+	config, err := loadTranslatorConfig(translatorName)
+	if err != nil {
+		return "", err
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return "", err
+	}
+
+	urls, ok := cfg["url"].(map[string]any)
+	if !ok {
+		return "", errors.New("url config is invalid")
+	}
+	url, ok := urls[region].(string)
+	if !ok || strings.TrimSpace(url) == "" {
+		return "", errors.New("url is invalid")
+	}
+	return url, nil
 }

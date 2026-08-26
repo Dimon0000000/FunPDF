@@ -34,7 +34,7 @@ func (s *TranslatorService) ListTranslators(ctx context.Context) ([]*entity.Tran
 
 // CreateTranslator create a unique translator
 func (s *TranslatorService) CreateTranslator(ctx context.Context, req *dto.CreateTranslatorsRequest) (*entity.Translator, error) {
-	translatorName := engine.NormalizeTranslatorName(req.Name)
+	translatorName := strings.ToLower(strings.TrimSpace(req.Name))
 	if translatorName == "" {
 		return nil, errors.New("translator name is required")
 	}
@@ -52,7 +52,6 @@ func (s *TranslatorService) CreateTranslator(ctx context.Context, req *dto.Creat
 
 // Translate source to dst language
 func (s *TranslatorService) Translate(ctx context.Context, req *dto.TranslateRequest, translatorName string) (string, error) {
-	translatorName = engine.NormalizeTranslatorName(translatorName)
 	var from, to, query string
 	if req.From == nil || strings.TrimSpace(*req.From) == "" {
 		switch translatorName {

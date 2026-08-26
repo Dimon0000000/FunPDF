@@ -16,7 +16,7 @@ import {
   type CachedFile,
 } from '@/api/files'
 import { apiErrorMessage } from '@/api/http'
-import { completeTranslation } from '@/api/translators'
+import { completeTranslation, normalizeTranslatorName } from '@/api/translators'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PdfWorker
 
@@ -974,7 +974,7 @@ async function translateSelectedText() {
   const viewport = pageViewport(page)
   if (!page || !viewport || !sourceText) return
 
-  const translator = localStorage.getItem('funpdf.translator') || 'Baidu-Translator'
+  const translator = normalizeTranslatorName(localStorage.getItem('funpdf.translator') || 'baidu')
   const targetLanguage = localStorage.getItem('funpdf.targetLanguage') || 'zh-CN'
   const sourceLanguage = localStorage.getItem('funpdf.sourceLanguage') || 'auto'
   const modelType = localStorage.getItem('funpdf.baidu.modelType') || 'nmt'
@@ -983,6 +983,7 @@ async function translateSelectedText() {
   const deeplModelType = localStorage.getItem('funpdf.deepl.modelType') || 'prefer_quality_optimized'
   const deeplFormality = localStorage.getItem('funpdf.deepl.formality') || 'default'
   const deeplPreserveFormatting = localStorage.getItem('funpdf.deepl.preserveFormatting') === 'true'
+  const googleFormat = localStorage.getItem('funpdf.google.format') || 'text'
   const quoteRects = textSelection.value.rects.map(clientRect => {
     const rect = viewportRect(clientRect, page)
     return {
@@ -1020,12 +1021,14 @@ async function translateSelectedText() {
       text: sourceText,
       source_language: sourceLanguage === 'auto' ? undefined : sourceLanguage,
       target_language: targetLanguage,
-      region: translator === 'Deepl-Translator' ? deeplRegion : undefined,
-      params: translator === 'Baidu-Translator'
+      region: translator === 'deepl' ? deeplRegion : undefined,
+      params: translator === 'baidu'
         ? { model_type: modelType, reference: reference.trim() || undefined }
-        : translator === 'Deepl-Translator'
+        : translator === 'deepl'
           ? { model_type: deeplModelType, formality: deeplFormality, preserve_formatting: deeplPreserveFormatting }
-          : {},
+          : translator === 'google'
+            ? { format: googleFormat }
+            : {},
     })
     translationPopup.value.result = response.translated_text
   } catch (requestError) {
