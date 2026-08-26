@@ -1,5 +1,5 @@
 {
-  "name": "Deepl-Translator",
+  "name": "deepl",
   "url": {
     "free": "https://api-free.deepl.com/v2/translate",
     "pro": "https://api.deepl.com/v2/translate"

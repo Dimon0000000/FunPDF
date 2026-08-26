@@ -42,11 +42,13 @@ func (d *TranslatorDAO) ListTranslators(ctx context.Context, db *gorm.DB) ([]*en
 
 // CreateTranslator create a unique translator
 func (d *TranslatorDAO) CreateTranslator(ctx context.Context, db *gorm.DB, translatorName string, params json.RawMessage) (*entity.Translator, error) {
-	if err := db.WithContext(ctx).Where("name = ?", translatorName).First(entity.Translator{}).Error; err == nil {
-		if errors.Is(gorm.ErrRecordNotFound, gorm.ErrRecordNotFound) {
-			// FIXME: there r some problem here[2026/08/26 08:53:56 E:/Haruko386-UnOffical/FunPDF/internal/dao/translator.go:45 record not found]
-		}
+	var existing entity.Translator
+	err := db.WithContext(ctx).Where("name = ?", translatorName).First(&existing).Error
+	if err == nil {
 		return nil, fmt.Errorf("translator with name %s already exists", translatorName)
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
 	var translator entity.Translator
@@ -54,7 +56,7 @@ func (d *TranslatorDAO) CreateTranslator(ctx context.Context, db *gorm.DB, trans
 	translator.Name = translatorName
 	translator.Params = params
 
-	err := db.WithContext(ctx).Create(&translator).Error
+	err = db.WithContext(ctx).Create(&translator).Error
 	if err != nil {
 		return nil, err
 	}

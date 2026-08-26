@@ -14,20 +14,21 @@ import (
 )
 
 const (
-	BaiduTranslateURL           = "https://fanyi-api.baidu.com/ait/api/aiTextTranslate"
 	BaiduTranslatorAPIReference = "https://fanyi-api.baidu.com/doc/21"
 )
 
 type BaiduTranslator struct {
 	APIKey     string `json:"api_key"`
 	APPID      string `json:"app_id"`
+	URL        string `json:"url"`
 	httpClient *http.Client
 }
 
-func NewBaiduTranslator(apiKey string, appID string) *BaiduTranslator {
+func NewBaiduTranslator(apiKey, appID, url string) *BaiduTranslator {
 	return &BaiduTranslator{
 		APIKey: apiKey,
 		APPID:  appID,
+		URL:    url,
 		httpClient: &http.Client{
 			Timeout: time.Second * 15,
 		},
@@ -87,7 +88,7 @@ func (b *BaiduTranslator) Translate(ctx context.Context, from, to, q string, par
 	toCtx, cancel := context.WithTimeout(ctx, b.httpClient.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(toCtx, "POST", BaiduTranslateURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(toCtx, "POST", b.URL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("new request: %w", err)
 	}
@@ -137,7 +138,7 @@ func (b *BaiduTranslator) Healthy(ctx context.Context) bool {
 	return err == nil
 }
 
-// Name Baidu-Translator
+// Name baidu
 func (b *BaiduTranslator) Name(ctx context.Context) string {
-	return "Baidu-Translator"
+	return "baidu"
 }

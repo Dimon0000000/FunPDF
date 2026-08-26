@@ -48,9 +48,6 @@ func (d *DeeplTranslator) Translate(ctx context.Context, from, to, q string, par
 	if q == "" {
 		return "", errors.New("the text is empty")
 	}
-	if len(q) > 6000 {
-		return "", errors.New("the text is too long, it needs to smaller than 6000")
-	}
 	reqBody["text"] = []string{ConcatenatingStrings(q)}
 
 	if from != "" {
@@ -152,5 +149,5 @@ func (d *DeeplTranslator) Healthy(ctx context.Context) bool {
 }
 
 func (d *DeeplTranslator) Name(ctx context.Context) string {
-	return "Deepl-Translator"
+	return "deepl"
 }
