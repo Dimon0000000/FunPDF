@@ -16,6 +16,7 @@ export interface TranslationCompletionRequest {
   text: string
   source_language?: string
   target_language: string
+  region?: string
   params?: Record<string, unknown>
 }
 
@@ -37,8 +38,12 @@ export async function createTranslator(payload: CreateTranslatorRequest) {
   return unwrapApiResponse<Translator>(response.data)
 }
 
-function toBackendLanguageCode(language: string) {
+function toBackendLanguageCode(language: string, translatorName: string) {
   const normalized = language.trim()
+  if (translatorName === 'Deepl-Translator') {
+    if (normalized === 'zh-CN' || normalized === 'zh-Hans') return 'zh'
+    return normalized.toLowerCase()
+  }
   if (normalized === 'zh-CN' || normalized === 'zh-Hans') return 'zh'
   return normalized
 }
@@ -47,8 +52,9 @@ export async function completeTranslation(translatorName: string, payload: Trans
   const backendPayload: Record<string, string | Record<string, unknown> | undefined> = {
     translator_name: translatorName,
     q: payload.text,
-    from: payload.source_language ? toBackendLanguageCode(payload.source_language) : undefined,
-    to: toBackendLanguageCode(payload.target_language),
+    from: payload.source_language ? toBackendLanguageCode(payload.source_language, translatorName) : undefined,
+    to: toBackendLanguageCode(payload.target_language, translatorName),
+    region: payload.region,
     params: payload.params ?? {},
   }
 

@@ -54,7 +54,7 @@ func (t *TranslatorFactory) GetTranslator(ctx context.Context, db *gorm.DB, tran
 			return nil, errors.New("api_key is invalid")
 		}
 
-		config, err := loadTranslatorConfig(translatorName)
+		config, err := loadTranslatorConfig("deepl")
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +65,7 @@ func (t *TranslatorFactory) GetTranslator(ctx context.Context, db *gorm.DB, tran
 			return nil, err
 		}
 
-		if region == "free" || region == "pro" {
+		if region != "free" && region != "pro" {
 			return nil, fmt.Errorf("region %s not supported for %s", region, translatorName)
 		}
 		url, ok := cfg["url"].(map[string]any)[region].(string)

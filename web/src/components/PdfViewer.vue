@@ -979,6 +979,10 @@ async function translateSelectedText() {
   const sourceLanguage = localStorage.getItem('funpdf.sourceLanguage') || 'auto'
   const modelType = localStorage.getItem('funpdf.baidu.modelType') || 'nmt'
   const reference = localStorage.getItem('funpdf.baidu.reference') || ''
+  const deeplRegion = localStorage.getItem('funpdf.deepl.region') || 'free'
+  const deeplModelType = localStorage.getItem('funpdf.deepl.modelType') || 'prefer_quality_optimized'
+  const deeplFormality = localStorage.getItem('funpdf.deepl.formality') || 'default'
+  const deeplPreserveFormatting = localStorage.getItem('funpdf.deepl.preserveFormatting') === 'true'
   const quoteRects = textSelection.value.rects.map(clientRect => {
     const rect = viewportRect(clientRect, page)
     return {
@@ -1016,9 +1020,12 @@ async function translateSelectedText() {
       text: sourceText,
       source_language: sourceLanguage === 'auto' ? undefined : sourceLanguage,
       target_language: targetLanguage,
+      region: translator === 'Deepl-Translator' ? deeplRegion : undefined,
       params: translator === 'Baidu-Translator'
         ? { model_type: modelType, reference: reference.trim() || undefined }
-        : {},
+        : translator === 'Deepl-Translator'
+          ? { model_type: deeplModelType, formality: deeplFormality, preserve_formatting: deeplPreserveFormatting }
+          : {},
     })
     translationPopup.value.result = response.translated_text
   } catch (requestError) {

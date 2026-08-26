@@ -72,9 +72,9 @@ func (s *TranslatorService) Translate(ctx context.Context, req *dto.TranslateReq
 		return "", nil
 	}
 
-	region := strings.TrimSpace(*req.Region)
-	if region == "" {
-		region = "default"
+	region := "default"
+	if req.Region != nil && strings.TrimSpace(*req.Region) != "" {
+		region = strings.TrimSpace(*req.Region)
 	}
 
 	translator, err := s.translatorFct.GetTranslator(ctx, dao.DB, translatorName, region)

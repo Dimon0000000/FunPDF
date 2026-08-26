@@ -63,8 +63,10 @@ func (b *BaiduTranslator) Translate(ctx context.Context, from, to, q string, par
 	reqBody["appid"] = b.APPID
 
 	var external map[string]any
-	if err := json.Unmarshal(params, &external); err != nil {
-		return "", err
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &external); err != nil {
+			return "", err
+		}
 	}
 	if external["model_type"] != nil && external["model_type"].(string) != "" {
 		mType := external["model_type"].(string)

@@ -34,13 +34,13 @@ func NewDeeplTranslator(apiKey, url string) *DeeplTranslator {
 		APIKey: apiKey,
 		URL:    url,
 		httpClient: &http.Client{
-			Timeout: time.Second * 15,
+			Timeout: time.Minute * 15,
 		},
 	}
 }
 
 // Translate for deepl, it receives `string[]` for translate. our APP only translate a sentence once. So we use `string[1]`
-func (d *DeeplTranslator) Translate(ctx context.Context, _, to, q string, params json.RawMessage) (string, error) {
+func (d *DeeplTranslator) Translate(ctx context.Context, from, to, q string, params json.RawMessage) (string, error) {
 	// build reqBody
 	reqBody := make(map[string]any)
 
@@ -51,21 +51,27 @@ func (d *DeeplTranslator) Translate(ctx context.Context, _, to, q string, params
 	if len(q) > 6000 {
 		return "", errors.New("the text is too long, it needs to smaller than 6000")
 	}
-	reqBody["q"] = ConcatenatingStrings(q)
+	reqBody["text"] = []string{ConcatenatingStrings(q)}
+
+	if from != "" {
+		reqBody["source_lang"] = from
+	}
 
 	if to != "" {
 		reqBody["target_lang"] = to
 	} else {
-		return "", errors.New("the dst language is empty")
+		return "", errors.New("the dst language should not be empty")
 	}
 
 	var external map[string]any
-	if err := json.Unmarshal(params, &external); err != nil {
-		return "", err
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &external); err != nil {
+			return "", err
+		}
 	}
 	if external["model_type"] != nil && external["model_type"].(string) != "" {
 		mType := external["model_type"].(string)
-		if mType == "quality_optimized" || mType == "prefer_quality_optimized" || mType == "latency_optimized " {
+		if mType == "quality_optimized" || mType == "prefer_quality_optimized" || mType == "latency_optimized" {
 			reqBody["model_type"] = mType
 		}
 	}
@@ -98,7 +104,7 @@ func (d *DeeplTranslator) Translate(ctx context.Context, _, to, q string, params
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", d.APIKey)
+	req.Header.Set("Authorization", "DeepL-Auth-Key "+d.APIKey)
 
 	resp, err := d.httpClient.Do(req)
 	if err != nil {
@@ -122,7 +128,10 @@ func (d *DeeplTranslator) Translate(ctx context.Context, _, to, q string, params
 		return "", fmt.Errorf("unmarshal response body: %w", err)
 	}
 
-	translations := result["translations"].([]any)
+	translations, ok := result["translations"].([]any)
+	if !ok {
+		return "", errors.New(resp.Status)
+	}
 	firstTranslation, ok := translations[0].(map[string]any)
 	if !ok {
 		return "", errors.New(fmt.Sprint("translations is not exist"))
