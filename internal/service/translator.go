@@ -35,7 +35,7 @@ func (s *TranslatorService) ListTranslators(ctx context.Context) ([]*entity.Tran
 // CreateTranslator create a unique translator
 func (s *TranslatorService) CreateTranslator(ctx context.Context, req *dto.CreateTranslatorsRequest) (*entity.Translator, error) {
 	translatorName := strings.ToLower(strings.TrimSpace(req.Name))
-	if req.Name == "" {
+	if translatorName == "" {
 		return nil, errors.New("translator name is required")
 	}
 
