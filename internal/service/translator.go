@@ -54,7 +54,12 @@ func (s *TranslatorService) CreateTranslator(ctx context.Context, req *dto.Creat
 func (s *TranslatorService) Translate(ctx context.Context, req *dto.TranslateRequest, translatorName string) (string, error) {
 	var from, to, query string
 	if req.From == nil || strings.TrimSpace(*req.From) == "" {
-		from = "auto"
+		switch translatorName {
+		case "Baidu-Translator":
+			from = "auto"
+		default:
+			from = ""
+		}
 	} else {
 		from = strings.TrimSpace(*req.From)
 	}
@@ -72,7 +77,12 @@ func (s *TranslatorService) Translate(ctx context.Context, req *dto.TranslateReq
 		return "", nil
 	}
 
-	translator, err := s.translatorFct.GetTranslator(ctx, dao.DB, translatorName)
+	region := "default"
+	if req.Region != nil && strings.TrimSpace(*req.Region) != "" {
+		region = strings.TrimSpace(*req.Region)
+	}
+
+	translator, err := s.translatorFct.GetTranslator(ctx, dao.DB, translatorName, region)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", errors.New("translator not found")

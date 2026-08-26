@@ -4,11 +4,11 @@ import { apiErrorMessage } from '@/api/http'
 import { completeTranslation, createTranslator, listTranslators, type Translator } from '@/api/translators'
 import { useReaderStore } from '@/stores/reader'
 
-type TranslatorType = 'Baidu-Translator' | 'DeepL-Translator' | 'Google-Translator'
+type TranslatorType = 'Baidu-Translator' | 'Deepl-Translator' | 'Google-Translator'
 
 const translatorTypes: Array<{ name: TranslatorType; label: string }> = [
   { name: 'Baidu-Translator', label: 'Baidu Translator' },
-  { name: 'DeepL-Translator', label: 'DeepL Translator' },
+  { name: 'Deepl-Translator', label: 'DeepL Translator' },
   { name: 'Google-Translator', label: 'Google Translator' },
 ]
 
@@ -21,6 +21,10 @@ const sourceLanguage = ref(localStorage.getItem('funpdf.sourceLanguage') || 'aut
 const targetLanguage = ref(localStorage.getItem('funpdf.targetLanguage') || 'zh-CN')
 const modelType = ref(localStorage.getItem('funpdf.baidu.modelType') || 'nmt')
 const reference = ref(localStorage.getItem('funpdf.baidu.reference') || '')
+const deeplRegion = ref(localStorage.getItem('funpdf.deepl.region') || 'free')
+const deeplModelType = ref(localStorage.getItem('funpdf.deepl.modelType') || 'prefer_quality_optimized')
+const deeplFormality = ref(localStorage.getItem('funpdf.deepl.formality') || 'default')
+const deeplPreserveFormatting = ref(localStorage.getItem('funpdf.deepl.preserveFormatting') === 'true')
 const result = ref('')
 const loading = ref(false)
 const configLoading = ref(false)
@@ -38,9 +42,8 @@ function fieldsFor(type: TranslatorType) {
     { key: 'api_key', label: 'Baidu API Key', type: 'password', placeholder: '百度翻译 API Key' },
     { key: 'app_id', label: 'Baidu APP ID', type: 'text', placeholder: '百度翻译 APP ID' },
   ]
-  if (type === 'DeepL-Translator') return [
+  if (type === 'Deepl-Translator') return [
     { key: 'api_key', label: 'DeepL API Key', type: 'password', placeholder: 'DeepL API Key' },
-    { key: 'base_url', label: 'DeepL Base URL', type: 'text', placeholder: '可选，例如 https://api-free.deepl.com' },
   ]
   return [
     { key: 'api_key', label: 'Google API Key', type: 'password', placeholder: 'Google Translate API Key' },
@@ -57,6 +60,10 @@ function persistRuntimeConfig() {
   localStorage.setItem('funpdf.targetLanguage', targetLanguage.value)
   localStorage.setItem('funpdf.baidu.modelType', modelType.value)
   localStorage.setItem('funpdf.baidu.reference', reference.value)
+  localStorage.setItem('funpdf.deepl.region', deeplRegion.value)
+  localStorage.setItem('funpdf.deepl.modelType', deeplModelType.value)
+  localStorage.setItem('funpdf.deepl.formality', deeplFormality.value)
+  localStorage.setItem('funpdf.deepl.preserveFormatting', String(deeplPreserveFormatting.value))
 }
 
 function resetCredentialDraft() {
@@ -85,7 +92,7 @@ async function saveTranslatorConfig() {
   const params: Record<string, string> = {}
   for (const field of fieldsFor(translatorType.value)) {
     const value = credentialDraft.value[field.key]?.trim() ?? ''
-    if (!value && field.key !== 'base_url') {
+    if (!value) {
       configError.value = `请填写 ${field.label}`
       return
     }
@@ -107,13 +114,27 @@ async function saveTranslatorConfig() {
   }
 }
 
-function runtimeParams() {
+function runtimeOptions() {
   persistRuntimeConfig()
-  if (currentTranslatorType.value !== 'Baidu-Translator') return {}
-  return {
-    model_type: modelType.value,
-    reference: reference.value.trim() || undefined,
+  if (currentTranslatorType.value === 'Baidu-Translator') {
+    return {
+      params: {
+        model_type: modelType.value,
+        reference: reference.value.trim() || undefined,
+      },
+    }
   }
+  if (currentTranslatorType.value === 'Deepl-Translator') {
+    return {
+      region: deeplRegion.value,
+      params: {
+        model_type: deeplModelType.value,
+        formality: deeplFormality.value,
+        preserve_formatting: deeplPreserveFormatting.value,
+      },
+    }
+  }
+  return { params: {} }
 }
 
 async function translate() {
@@ -127,7 +148,7 @@ async function translate() {
       text: store.selectedText,
       source_language: sourceLanguage.value === 'auto' ? undefined : sourceLanguage.value,
       target_language: targetLanguage.value,
-      params: runtimeParams(),
+      ...runtimeOptions(),
     })
     result.value = response.translated_text
   } catch (requestError) { error.value = apiErrorMessage(requestError, '翻译失败') }
@@ -135,7 +156,7 @@ async function translate() {
 }
 
 watch(translator, persistTranslator)
-watch([sourceLanguage, targetLanguage, modelType, reference], persistRuntimeConfig)
+watch([sourceLanguage, targetLanguage, modelType, reference, deeplRegion, deeplModelType, deeplFormality, deeplPreserveFormatting], persistRuntimeConfig)
 onMounted(() => void refreshTranslators())
 </script>
 
@@ -187,11 +208,17 @@ onMounted(() => void refreshTranslators())
 
     <section class="translator-config">
       <div class="section-title"><strong>局内配置</strong></div>
-      <label>源语言<select v-model="sourceLanguage"><option value="auto">自动检测</option><option value="zh">中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
-      <label>目标语言<select v-model="targetLanguage"><option value="zh-CN">简体中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
+      <label>源语言<select v-model="sourceLanguage"><option value="auto">自动检测</option><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="es">Español</option><option value="fr">Français</option><option value="it">Italiano</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
+      <label>目标语言<select v-model="targetLanguage"><option value="zh">中文</option><option value="en">English</option><option value="de">Deutsch</option><option value="es">Español</option><option value="fr">Français</option><option value="it">Italiano</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
       <template v-if="currentTranslatorType === 'Baidu-Translator'">
         <label>模型<select v-model="modelType"><option value="nmt">nmt</option><option value="llm">llm</option></select></label>
         <label>参考信息<textarea v-model="reference" maxlength="2000" placeholder="可选。按百度文档用于提供术语、上下文或参考译文。"></textarea></label>
+      </template>
+      <template v-else-if="currentTranslatorType === 'Deepl-Translator'">
+        <label>区域<select v-model="deeplRegion"><option value="free">Free</option><option value="pro">Pro</option></select></label>
+        <label>模型<select v-model="deeplModelType"><option value="prefer_quality_optimized">prefer_quality_optimized</option><option value="quality_optimized">quality_optimized</option><option value="latency_optimized">latency_optimized</option></select></label>
+        <label>语气<select v-model="deeplFormality"><option value="default">default</option><option value="more">more</option><option value="less">less</option><option value="prefer_more">prefer_more</option><option value="prefer_less">prefer_less</option></select></label>
+        <label class="checkbox-label"><input v-model="deeplPreserveFormatting" type="checkbox" /> 保留格式</label>
       </template>
     </section>
 
@@ -217,6 +244,8 @@ label { display: grid; gap: 4px; color: #777c81; font-size: 11px; }
 input, select, textarea { width: 100%; border: 1px solid #d8d8d8; border-radius: 6px; padding: 0 8px; background: white; color: #40454a; font-size: 12px; outline: none; }
 input, select { height: 34px; }
 textarea { min-height: 72px; max-height: 180px; padding: 8px; resize: vertical; line-height: 1.5; overflow: auto; }
+.checkbox-label { display: flex; align-items: center; gap: 8px; }
+.checkbox-label input { width: 14px; height: 14px; padding: 0; }
 .empty-inline { padding: 9px 10px; border-radius: 6px; background: white; color: #8b8f94; font-size: 12px; }
 .text-card, .result { padding: 11px; border: 1px solid #dedede; border-radius: 8px; background: white; }
 .text-card span, .result span { color: #8b8f94; font-size: 10px; }
