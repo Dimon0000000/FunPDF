@@ -1,8 +1,8 @@
 package dto
 
 type ListProvidersResult struct {
-	Name    string            `json:"name"`
-	BaseURL map[string]string `json:"url"`
+	Name    string `json:"name"`
+	BaseURL string `json:"url"`
 }
 
 type CreateProviderRequest struct {
@@ -13,7 +13,7 @@ type CreateProviderRequest struct {
 }
 
 type UpdateProviderRequest struct {
-	BaseURL   string `json:"base_url"`
-	URLSuffix string `json:"url_suffix"`
-	APIKey    string `json:"api_key"`
+	BaseURL   string            `json:"base_url"`
+	URLSuffix map[string]string `json:"url_suffix"`
+	APIKey    string            `json:"api_key"`
 }

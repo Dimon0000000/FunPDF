@@ -9,7 +9,7 @@ import (
 /* Interface */
 
 type BaseModelInterface interface {
-	Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg *ChatConfig, messages []Message, modelName string) (*dto.ChatResponse, error)
+	Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg *ChatConfig, messages []Message, modelName string, sender func(*string, *string) error) (*dto.ChatResponse, error)
 	ListModels(ctx context.Context, modelCfg *ModelConfig) (*[]dto.ListModelsResponse, error)
 	Name() string
 }
@@ -19,7 +19,7 @@ type BaseModelInterface interface {
 type BaseModel struct {
 	BaseURL    string
 	URLSuffix  string
-	httpClient *http.Client
+	HTTPClient *http.Client
 }
 
 type Message struct {

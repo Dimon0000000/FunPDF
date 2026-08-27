@@ -71,7 +71,7 @@ func (h *ProviderHandler) UpdateProvider(c *gin.Context) {
 		return
 	}
 
-	providerID := strings.TrimSpace(c.Param("id"))
+	providerID := strings.TrimSpace(c.Param("provider_id"))
 
 	err := h.providerSvr.UpdateProvider(c.Request.Context(), &req, providerID)
 	if err != nil {
@@ -89,5 +89,26 @@ func (h *ProviderHandler) UpdateProvider(c *gin.Context) {
 }
 
 func (h *ProviderHandler) DeleteProvider(c *gin.Context) {
+	providerID := strings.TrimSpace(c.Param("provider_id"))
+	if providerID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  "provider id is required",
+		})
+		return
+	}
 
+	err := h.providerSvr.DeleteProvider(c.Request.Context(), providerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"msg":  "success",
+	})
 }

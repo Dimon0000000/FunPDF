@@ -10,8 +10,11 @@ import (
 	"strings"
 )
 
-func doStreamChat(req *http.Request) (*dto.ChatResponse, error) {
-	resp, err := http.DefaultClient.Do(req)
+func doStreamChat(client *http.Client, req *http.Request, sender func(*string, *string) error) (*dto.ChatResponse, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -54,9 +57,19 @@ func doStreamChat(req *http.Request) (*dto.ChatResponse, error) {
 		}
 		if content, ok := delta["content"].(string); ok {
 			answer.WriteString(content)
+			if sender != nil {
+				if err := sender(&content, nil); err != nil {
+					return nil, err
+				}
+			}
 		}
 		if content, ok := delta["reasoning_content"].(string); ok {
 			reasonContent.WriteString(content)
+			if sender != nil {
+				if err := sender(nil, &content); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	if err = scanner.Err(); err != nil {
@@ -71,8 +84,11 @@ func doStreamChat(req *http.Request) (*dto.ChatResponse, error) {
 	}, nil
 }
 
-func doNoneStreamChat(req *http.Request) (*dto.ChatResponse, error) {
-	resp, err := http.DefaultClient.Do(req)
+func doNoneStreamChat(client *http.Client, req *http.Request) (*dto.ChatResponse, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -14,7 +14,7 @@ type DeepSeekModel struct {
 	BaseModel
 }
 
-func (d *DeepSeekModel) Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg *ChatConfig, messages []Message, modelName string) (*dto.ChatResponse, error) {
+func (d *DeepSeekModel) Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg *ChatConfig, messages []Message, modelName string, sender func(*string, *string) error) (*dto.ChatResponse, error) {
 	url := fmt.Sprintf("%s/%s", d.BaseURL, d.URLSuffix)
 
 	isStream := chatCfg != nil && chatCfg.Stream != nil && *chatCfg.Stream
@@ -31,14 +31,7 @@ func (d *DeepSeekModel) Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg
 		return nil, err
 	}
 
-	toCtx := ctx
-	var cancel context.CancelFunc
-	if d.httpClient != nil && d.httpClient.Timeout > 0 {
-		toCtx, cancel = context.WithTimeout(ctx, d.httpClient.Timeout)
-		defer cancel()
-	}
-
-	req, err := http.NewRequestWithContext(toCtx, "POST", url, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}
@@ -47,23 +40,16 @@ func (d *DeepSeekModel) Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", *modelCfg.APIKey))
 
 	if isStream {
-		return doStreamChat(req)
+		return doStreamChat(d.HTTPClient, req, sender)
 	}
-	return doNoneStreamChat(req)
+	return doNoneStreamChat(d.HTTPClient, req)
 
 }
 
 func (d *DeepSeekModel) ListModels(ctx context.Context, modelCfg *ModelConfig) (*[]dto.ListModelsResponse, error) {
 	url := fmt.Sprintf("%s/%s", d.BaseURL, d.URLSuffix)
 
-	toCtx := ctx
-	var cancel context.CancelFunc
-	if d.httpClient != nil && d.httpClient.Timeout > 0 {
-		toCtx, cancel = context.WithTimeout(ctx, d.httpClient.Timeout)
-		defer cancel()
-	}
-
-	req, err := http.NewRequestWithContext(toCtx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +57,11 @@ func (d *DeepSeekModel) ListModels(ctx context.Context, modelCfg *ModelConfig) (
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", *modelCfg.APIKey))
 
-	resp, err := http.DefaultClient.Do(req)
+	client := d.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

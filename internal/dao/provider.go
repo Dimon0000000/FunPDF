@@ -5,7 +5,9 @@ import (
 	"FunPDF/internal/dto"
 	"FunPDF/internal/entity"
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -29,6 +31,9 @@ func (d *ProviderDAO) ListProviders(ctx context.Context, db *gorm.DB) ([]dto.Lis
 
 // CreateProvider create a provider
 func (d *ProviderDAO) CreateProvider(ctx context.Context, db *gorm.DB, req *dto.CreateProviderRequest) error {
+	if strings.TrimSpace(req.URLSuffix["chat"]) == "" || strings.TrimSpace(req.URLSuffix["models"]) == "" {
+		return errors.New("provider chat and models url suffix are required")
+	}
 	id := common.GenerateUUIDv7()
 	provider := entity.Provider{
 		ID:        id,
@@ -43,6 +48,9 @@ func (d *ProviderDAO) CreateProvider(ctx context.Context, db *gorm.DB, req *dto.
 
 // UpdateProvider update provider
 func (d *ProviderDAO) UpdateProvider(ctx context.Context, db *gorm.DB, req *dto.UpdateProviderRequest, providerID string) (int64, error) {
+	if strings.TrimSpace(req.URLSuffix["chat"]) == "" || strings.TrimSpace(req.URLSuffix["models"]) == "" {
+		return 0, errors.New("provider chat and models url suffix are required")
+	}
 	result := db.WithContext(ctx).Model(&entity.Provider{}).
 		Where("id = ?", providerID).
 		Updates(*req)
@@ -63,21 +71,23 @@ func (d *ProviderDAO) DeleteProvider(ctx context.Context, db *gorm.DB, providerI
 
 		// delete models that related to provider
 		var models []entity.ProviderModel
-		err = db.WithContext(ctx).Where("provider_id = ?", providerID).Find(&models).Error
+		err = tx.WithContext(ctx).Where("provider_id = ?", providerID).Find(&models).Error
 		if err != nil {
 			return fmt.Errorf("delete provider error: %s", err.Error())
 		}
 
 		for _, model := range models {
-			err = db.WithContext(ctx).Model(&entity.Model{}).
-				Where("id = ?", model.ModelID).Error
+			err = tx.WithContext(ctx).Model(&entity.Model{}).
+				Where("id = ?", model.ModelID).
+				Delete(&entity.Model{}).
+				Error
 			if err != nil {
-				return fmt.Errorf("delete provider error: %s", err.Error())
+				return fmt.Errorf("delete model error: %s", err.Error())
 			}
 		}
 
 		// delete relationship
-		err = db.WithContext(ctx).Model(&entity.ProviderModel{}).
+		err = tx.WithContext(ctx).Model(&entity.ProviderModel{}).
 			Where("provider_id = ?", providerID).
 			Delete(&entity.ProviderModel{}).Error
 		if err != nil {

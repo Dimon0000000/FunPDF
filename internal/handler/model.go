@@ -95,10 +95,8 @@ func (h *ModelHandler) ChatToModel(c *gin.Context) {
 		}
 
 		if err := h.modelSvr.ChatToModelStreamWithSender(c.Request.Context(), providerID, req.ModelName, req.ModelID, messages, modelCfg, chatCfg, sender); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code": http.StatusInternalServerError,
-				"msg":  err,
-			})
+			c.SSEvent("error", err.Error())
+			c.Writer.Flush()
 			return
 		}
 

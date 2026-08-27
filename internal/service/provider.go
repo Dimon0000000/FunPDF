@@ -37,6 +37,13 @@ func (s *ProviderService) CreateProvider(ctx context.Context, req *dto.CreatePro
 
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	req.APIKey = strings.TrimSpace(req.APIKey)
+	chatSuffix := strings.TrimSpace(req.URLSuffix["chat"])
+	modelsSuffix := strings.TrimSpace(req.URLSuffix["models"])
+	if chatSuffix == "" || modelsSuffix == "" {
+		return errors.New("provider chat and models url suffix are required")
+	}
+	req.URLSuffix["chat"] = chatSuffix
+	req.URLSuffix["models"] = modelsSuffix
 
 	if err := s.providerDAO.CreateProvider(ctx, dao.DB, req); err != nil {
 		return err
@@ -53,6 +60,13 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, req *dto.UpdatePro
 
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	req.APIKey = strings.TrimSpace(req.APIKey)
+	chatSuffix := strings.TrimSpace(req.URLSuffix["chat"])
+	modelsSuffix := strings.TrimSpace(req.URLSuffix["models"])
+	if chatSuffix == "" || modelsSuffix == "" {
+		return errors.New("provider chat and models url suffix are required")
+	}
+	req.URLSuffix["chat"] = chatSuffix
+	req.URLSuffix["models"] = modelsSuffix
 
 	affected, err := s.providerDAO.UpdateProvider(ctx, dao.DB, req, providerID)
 	if affected != 1 {

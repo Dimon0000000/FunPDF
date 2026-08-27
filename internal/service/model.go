@@ -8,36 +8,40 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"strings"
+	"time"
 )
 
 type ModelService struct {
+	httpClient *http.Client
 }
 
 func NewModelService() *ModelService {
-	return &ModelService{}
+	return &ModelService{
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+				ResponseHeaderTimeout: 30 * time.Second,
+			},
+		},
+	}
 }
 
 func (s *ModelService) ChatToModelStreamWithSender(ctx context.Context, providerID, modelName, modelID string, messages []models.Message, modelCfg models.ModelConfig, chatCfg models.ChatConfig, sender func(*string, *string) error) error {
-	resp, err := s.ChatToModel(ctx, providerID, modelName, modelID, messages, modelCfg, chatCfg)
+	resp, err := s.ChatToModel(ctx, providerID, modelName, modelID, messages, modelCfg, chatCfg, sender)
 	if err != nil {
 		return err
 	}
-	if resp.ReasonContent != nil && *resp.ReasonContent != "" {
-		if err := sender(nil, resp.ReasonContent); err != nil {
-			return err
-		}
-	}
-	if resp.Answer != nil && *resp.Answer != "" {
-		if err := sender(resp.Answer, nil); err != nil {
-			return err
-		}
+	if resp == nil {
+		return nil
 	}
 	done := "[DONE]"
 	return sender(&done, nil)
 }
 
-func (s *ModelService) ChatToModel(ctx context.Context, providerID, modelName, modelID string, messages []models.Message, modelCfg models.ModelConfig, chatCfg models.ChatConfig) (*dto.ChatResponse, error) {
+func (s *ModelService) ChatToModel(ctx context.Context, providerID, modelName, modelID string, messages []models.Message, modelCfg models.ModelConfig, chatCfg models.ChatConfig, sender ...func(*string, *string) error) (*dto.ChatResponse, error) {
 	providerID = strings.TrimSpace(providerID)
 	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
@@ -57,15 +61,20 @@ func (s *ModelService) ChatToModel(ctx context.Context, providerID, modelName, m
 
 	apiKey := strings.TrimSpace(provider.APIKey)
 	modelCfg.APIKey = &apiKey
+	var streamSender func(*string, *string) error
+	if len(sender) > 0 {
+		streamSender = sender[0]
+	}
 
 	switch strings.ToLower(strings.TrimSpace(provider.Name)) {
 	case "deepseek":
 		return (&models.DeepSeekModel{
 			BaseModel: models.BaseModel{
-				BaseURL:   strings.TrimRight(provider.BaseURL, "/"),
-				URLSuffix: strings.TrimLeft(provider.URLSuffix["chat"], "/"),
+				BaseURL:    strings.TrimRight(provider.BaseURL, "/"),
+				URLSuffix:  strings.TrimLeft(provider.URLSuffix["chat"], "/"),
+				HTTPClient: s.httpClient,
 			},
-		}).Chat(ctx, &modelCfg, &chatCfg, messages, modelName)
+		}).Chat(ctx, &modelCfg, &chatCfg, messages, modelName, streamSender)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider.Name)
 	}
@@ -89,8 +98,9 @@ func (s *ModelService) ListSupportedModels(ctx context.Context, providerID strin
 	case "deepseek":
 		return (&models.DeepSeekModel{
 			BaseModel: models.BaseModel{
-				BaseURL:   strings.TrimRight(provider.BaseURL, "/"),
-				URLSuffix: strings.TrimLeft(provider.URLSuffix["models"], "/"),
+				BaseURL:    strings.TrimRight(provider.BaseURL, "/"),
+				URLSuffix:  strings.TrimLeft(provider.URLSuffix["models"], "/"),
+				HTTPClient: s.httpClient,
 			},
 		}).ListModels(ctx, &modelCfg)
 	default:
