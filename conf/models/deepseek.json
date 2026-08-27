@@ -1,0 +1,10 @@
+{
+  "name": "DeepSeek",
+  "url": {
+    "default": "https://api.deepseek.com"
+  },
+  "url_suffix": {
+    "chat": "chat/completions",
+    "models": "models"
+  }
+}

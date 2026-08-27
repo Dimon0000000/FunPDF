@@ -1,0 +1,10 @@
+{
+  "name": "SILICONFLOW",
+  "url": {
+    "default": "https://api.siliconflow.cn/v1"
+  },
+  "url_suffix": {
+    "chat": "chat/completions",
+    "models": "models",
+  }
+}

@@ -1,1 +1,93 @@
 package handler
+
+import (
+	"FunPDF/internal/dto"
+	"FunPDF/internal/service"
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+)
+
+type ProviderHandler struct {
+	providerSvr *service.ProviderService
+}
+
+func NewProviderHandler() *ProviderHandler {
+	return &ProviderHandler{
+		providerSvr: service.NewProviderService(),
+	}
+}
+
+// ListProviders list supported providers
+func (h *ProviderHandler) ListProviders(c *gin.Context) {
+	result, err := h.providerSvr.ListProviders(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"data": result,
+		"msg":  "success",
+	})
+}
+
+// CreateProvider Create a custom provider
+func (h *ProviderHandler) CreateProvider(c *gin.Context) {
+	var req dto.CreateProviderRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	if err := h.providerSvr.CreateProvider(c.Request.Context(), &req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"msg":  "success",
+	})
+}
+
+func (h *ProviderHandler) UpdateProvider(c *gin.Context) {
+	var req dto.UpdateProviderRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	providerID := strings.TrimSpace(c.Param("id"))
+
+	err := h.providerSvr.UpdateProvider(c.Request.Context(), &req, providerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"msg":  "success",
+	})
+}
+
+func (h *ProviderHandler) DeleteProvider(c *gin.Context) {
+
+}

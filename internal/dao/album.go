@@ -4,7 +4,6 @@ import (
 	"FunPDF/internal/dto"
 	"FunPDF/internal/entity"
 	"context"
-	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -64,14 +63,6 @@ func (d *AlbumDAO) UpdateAlbum(ctx context.Context, db *gorm.DB, req *dto.Update
 // DeleteAlbum delete the album(delete album not have influence on normal files)
 func (d *AlbumDAO) DeleteAlbum(ctx context.Context, db *gorm.DB, albumID string) error {
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var album entity.Album
-		if err := tx.Where("id = ?", albumID).First(&album).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("album not found")
-			}
-			return err
-		}
-
 		err := tx.Where("album_id = ?", albumID).
 			Delete(&entity.AlbumFile{}).Error
 		if err != nil {

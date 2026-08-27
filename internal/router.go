@@ -10,14 +10,18 @@ type Router struct {
 	fileHandler       *handler.FileHandler
 	albumHandler      *handler.AlbumHandler
 	translatorHandler *handler.TranslatorHandler
+	providerHandler   *handler.ProviderHandler
+	modelHandler      *handler.ModelHandler
 }
 
 // NewRouter create a new router
-func NewRouter(fileHandler *handler.FileHandler, albumHandler *handler.AlbumHandler, translatorHandler *handler.TranslatorHandler) *Router {
+func NewRouter(fileHandler *handler.FileHandler, albumHandler *handler.AlbumHandler, translatorHandler *handler.TranslatorHandler, providerHandler *handler.ProviderHandler, modelHandler *handler.ModelHandler) *Router {
 	return &Router{
 		fileHandler:       fileHandler,
 		albumHandler:      albumHandler,
 		translatorHandler: translatorHandler,
+		providerHandler:   providerHandler,
+		modelHandler:      modelHandler,
 	}
 }
 
@@ -59,6 +63,18 @@ func (r *Router) Setup(e *gin.Engine) {
 			translator.POST("", r.translatorHandler.CreateTranslator)
 
 			translator.POST("/:translator_name", r.translatorHandler.Translate)
+		}
+
+		provider := api.Group("/providers")
+		{
+			provider.GET("", r.providerHandler.ListProviders)
+			provider.POST("", r.providerHandler.CreateProvider)
+
+			provider.PATCH("/:provider_id", r.providerHandler.UpdateProvider)
+			provider.DELETE("/:provider_id", r.providerHandler.DeleteProvider)
+
+			provider.POST("/:provider_id/chat", r.modelHandler.ChatToModel)
+			provider.GET("/:provider_id/list", r.modelHandler.ListSupportedModels)
 		}
 	}
 }
