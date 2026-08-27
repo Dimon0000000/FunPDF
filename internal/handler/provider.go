@@ -3,6 +3,7 @@ package handler
 import (
 	"FunPDF/internal/dto"
 	"FunPDF/internal/service"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -48,8 +49,12 @@ func (h *ProviderHandler) CreateProvider(c *gin.Context) {
 	}
 
 	if err := h.providerSvr.CreateProvider(c.Request.Context(), &req); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code": http.StatusInternalServerError,
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrProviderNameRequired) || errors.Is(err, service.ErrProviderURLSuffix) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{
+			"code": status,
 			"msg":  err.Error(),
 		})
 		return
@@ -75,8 +80,15 @@ func (h *ProviderHandler) UpdateProvider(c *gin.Context) {
 
 	err := h.providerSvr.UpdateProvider(c.Request.Context(), &req, providerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code": http.StatusInternalServerError,
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, service.ErrProviderIDRequired), errors.Is(err, service.ErrProviderURLSuffix):
+			status = http.StatusBadRequest
+		case errors.Is(err, service.ErrProviderNotFound):
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{
+			"code": status,
 			"msg":  err.Error(),
 		})
 		return

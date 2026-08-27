@@ -31,7 +31,7 @@ func (s *ProviderService) ListProviders(ctx context.Context) (*[]dto.ListProvide
 func (s *ProviderService) CreateProvider(ctx context.Context, req *dto.CreateProviderRequest) error {
 	modelName := strings.TrimSpace(req.Name)
 	if modelName == "" {
-		return errors.New("model name is empty")
+		return ErrProviderNameRequired
 	}
 	req.Name = modelName
 
@@ -40,7 +40,7 @@ func (s *ProviderService) CreateProvider(ctx context.Context, req *dto.CreatePro
 	chatSuffix := strings.TrimSpace(req.URLSuffix["chat"])
 	modelsSuffix := strings.TrimSpace(req.URLSuffix["models"])
 	if chatSuffix == "" || modelsSuffix == "" {
-		return errors.New("provider chat and models url suffix are required")
+		return ErrProviderURLSuffix
 	}
 	req.URLSuffix["chat"] = chatSuffix
 	req.URLSuffix["models"] = modelsSuffix
@@ -55,7 +55,7 @@ func (s *ProviderService) CreateProvider(ctx context.Context, req *dto.CreatePro
 func (s *ProviderService) UpdateProvider(ctx context.Context, req *dto.UpdateProviderRequest, providerID string) error {
 	providerID = strings.TrimSpace(providerID)
 	if providerID == "" {
-		return errors.New("provider id is empty")
+		return ErrProviderIDRequired
 	}
 
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
@@ -63,7 +63,7 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, req *dto.UpdatePro
 	chatSuffix := strings.TrimSpace(req.URLSuffix["chat"])
 	modelsSuffix := strings.TrimSpace(req.URLSuffix["models"])
 	if chatSuffix == "" || modelsSuffix == "" {
-		return errors.New("provider chat and models url suffix are required")
+		return ErrProviderURLSuffix
 	}
 	req.URLSuffix["chat"] = chatSuffix
 	req.URLSuffix["models"] = modelsSuffix
@@ -71,7 +71,7 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, req *dto.UpdatePro
 	affected, err := s.providerDAO.UpdateProvider(ctx, dao.DB, req, providerID)
 	if affected != 1 {
 		if affected < 1 {
-			return errors.New("provider not found")
+			return ErrProviderNotFound
 		}
 
 		return errors.New("affected too many rows. please delete the provider and create a new one")

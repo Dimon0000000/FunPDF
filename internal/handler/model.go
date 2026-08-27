@@ -4,6 +4,7 @@ import (
 	"FunPDF/internal/dto"
 	"FunPDF/internal/entity/models"
 	"FunPDF/internal/service"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -115,8 +116,15 @@ func (h *ModelHandler) ChatToModel(c *gin.Context) {
 
 	result, err := h.modelSvr.ChatToModel(c.Request.Context(), providerID, req.ModelName, req.ModelID, messages, modelCfg, chatCfg)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code": http.StatusInternalServerError,
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, service.ErrModelNameRequired), errors.Is(err, service.ErrUnsupportedProvider):
+			status = http.StatusBadRequest
+		case errors.Is(err, service.ErrProviderIDRequired), errors.Is(err, service.ErrProviderNotFound):
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{
+			"code": status,
 			"msg":  err.Error(),
 		})
 		return
@@ -141,8 +149,12 @@ func (h *ModelHandler) ListSupportedModels(c *gin.Context) {
 
 	result, err := h.modelSvr.ListSupportedModels(c.Request.Context(), providerID, models.ModelConfig{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code": http.StatusInternalServerError,
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrProviderNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{
+			"code": status,
 			"msg":  err.Error(),
 		})
 		return

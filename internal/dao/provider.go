@@ -51,9 +51,14 @@ func (d *ProviderDAO) UpdateProvider(ctx context.Context, db *gorm.DB, req *dto.
 	if strings.TrimSpace(req.URLSuffix["chat"]) == "" || strings.TrimSpace(req.URLSuffix["models"]) == "" {
 		return 0, errors.New("provider chat and models url suffix are required")
 	}
+	update := entity.Provider{
+		BaseURL:   req.BaseURL,
+		URLSuffix: req.URLSuffix,
+		APIKey:    req.APIKey,
+	}
 	result := db.WithContext(ctx).Model(&entity.Provider{}).
 		Where("id = ?", providerID).
-		Updates(*req)
+		Updates(update)
 	return result.RowsAffected, result.Error
 }
 

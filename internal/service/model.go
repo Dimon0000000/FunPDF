@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type ModelService struct {
@@ -19,12 +21,13 @@ type ModelService struct {
 }
 
 func NewModelService() *ModelService {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	transport.ResponseHeaderTimeout = 30 * time.Second
+
 	return &ModelService{
 		httpClient: &http.Client{
-			Transport: &http.Transport{
-				DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-				ResponseHeaderTimeout: 30 * time.Second,
-			},
+			Transport: transport,
 		},
 	}
 }
@@ -48,14 +51,17 @@ func (s *ModelService) ChatToModel(ctx context.Context, providerID, modelName, m
 		modelName = strings.TrimSpace(modelID)
 	}
 	if providerID == "" {
-		return nil, errors.New("provider id is empty")
+		return nil, ErrProviderIDRequired
 	}
 	if modelName == "" {
-		return nil, errors.New("model name is empty")
+		return nil, ErrModelNameRequired
 	}
 
 	var provider entity.Provider
 	if err := dao.DB.WithContext(ctx).Where("id = ?", providerID).First(&provider).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProviderNotFound
+		}
 		return nil, err
 	}
 
@@ -76,18 +82,21 @@ func (s *ModelService) ChatToModel(ctx context.Context, providerID, modelName, m
 			},
 		}).Chat(ctx, &modelCfg, &chatCfg, messages, modelName, streamSender)
 	default:
-		return nil, fmt.Errorf("unsupported provider: %s", provider.Name)
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedProvider, provider.Name)
 	}
 }
 
 func (s *ModelService) ListSupportedModels(ctx context.Context, providerID string, modelCfg models.ModelConfig) (*[]dto.ListModelsResponse, error) {
 	providerID = strings.TrimSpace(providerID)
 	if providerID == "" {
-		return nil, errors.New("provider id is empty")
+		return nil, ErrProviderIDRequired
 	}
 
 	var provider entity.Provider
 	if err := dao.DB.WithContext(ctx).Where("id = ?", providerID).First(&provider).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProviderNotFound
+		}
 		return nil, err
 	}
 
@@ -104,6 +113,6 @@ func (s *ModelService) ListSupportedModels(ctx context.Context, providerID strin
 			},
 		}).ListModels(ctx, &modelCfg)
 	default:
-		return nil, fmt.Errorf("unsupported provider: %s", provider.Name)
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedProvider, provider.Name)
 	}
 }
