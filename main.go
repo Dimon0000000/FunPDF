@@ -30,9 +30,11 @@ func main() {
 	fileHandler := handler.NewFileHandler()
 	albumHandler := handler.NewAlbumHandler()
 	translatorHandler := handler.NewTranslatorHandler()
+	providerHandler := handler.NewProviderHandler()
+	modelHandler := handler.NewModelHandler()
 
 	r := gin.Default()
-	router := internal.NewRouter(fileHandler, albumHandler, translatorHandler)
+	router := internal.NewRouter(fileHandler, albumHandler, translatorHandler, providerHandler, modelHandler)
 	router.Setup(r)
 
 	dsn := os.Getenv("FUNPDF_MYSQL_DSN")
@@ -42,7 +44,7 @@ func main() {
 	if err := dao.InitMysql(dsn); err != nil {
 		log.Fatalf("initialize MySQL: %v", err)
 	}
-	if err := dao.DB.AutoMigrate(&entity.File{}, &entity.Album{}, &entity.AlbumFile{}, &entity.Translator{}); err != nil {
+	if err := dao.DB.AutoMigrate(&entity.File{}, &entity.Album{}, &entity.AlbumFile{}, &entity.Translator{}, &entity.Model{}, &entity.Provider{}, &entity.ProviderModel{}); err != nil {
 		log.Fatalf("migrate file table: %v", err)
 	}
 

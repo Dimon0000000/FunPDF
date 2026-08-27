@@ -1,7 +1,9 @@
 package service
 
 import (
+	"FunPDF/internal/dto"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -112,4 +114,32 @@ func checkDuplicateIDs(ids []string) []string {
 		validIDs = append(validIDs, id)
 	}
 	return validIDs
+}
+
+func GetLocalJsonProviders() ([]dto.ListProvidersResult, error) {
+	list := make([]dto.ListProvidersResult, 0)
+	entries, err := os.ReadDir("conf/models")
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			filePath := filepath.Join("conf/models", entry.Name())
+
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				return nil, err
+			}
+
+			var model dto.ListProvidersResult
+			err = json.Unmarshal(data, &model)
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, model)
+		}
+	}
+
+	return list, nil
 }

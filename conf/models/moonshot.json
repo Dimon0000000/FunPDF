@@ -1,0 +1,10 @@
+{
+  "name": "Moonshot",
+  "url": {
+    "default": "https://api.moonshot.cn/v1"
+  },
+  "url_suffix": {
+    "chat": "chat/completions",
+    "models": "models"
+  }
+}

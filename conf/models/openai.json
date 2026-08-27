@@ -1,0 +1,10 @@
+{
+  "name": "OpenAI",
+  "url": {
+    "default": "https://api.openai.com/v1"
+  },
+  "url_suffix": {
+    "chat": "chat/completions",
+    "models": "models"
+  }
+}
