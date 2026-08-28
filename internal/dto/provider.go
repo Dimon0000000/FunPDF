@@ -10,7 +10,7 @@ type ListProvidersResult struct {
 }
 
 type CreateProviderRequest struct {
-	ID        string            `json:"id"`
+	ID        string
 	Name      string            `json:"name"`
 	BaseURL   string            `json:"base_url"`
 	URLSuffix map[string]string `json:"url_suffix"`

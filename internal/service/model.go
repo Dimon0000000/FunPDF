@@ -50,7 +50,8 @@ func (s *ModelService) SaveProviderModels(ctx context.Context, providerID string
 	}
 	savedModelNames := make([]string, 0, len(*req.Names))
 	for _, name := range *req.Names {
-		if strings.TrimSpace(name) != "" {
+		name = strings.TrimSpace(name)
+		if name != "" {
 			savedModelNames = append(savedModelNames, name)
 		}
 	}
@@ -72,7 +73,8 @@ func (s *ModelService) DeleteProviderModels(ctx context.Context, providerID stri
 	}
 	modelIDs := make([]string, 0, len(*req.IDs))
 	for _, id := range *req.IDs {
-		if strings.TrimSpace(id) != "" {
+		id = strings.TrimSpace(id)
+		if id != "" {
 			modelIDs = append(modelIDs, id)
 		}
 	}
