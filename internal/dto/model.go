@@ -4,6 +4,19 @@ type ListModelsResponse struct {
 	Name string `json:"name"`
 }
 
+type ListProviderModelsResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type SaveModelsRequest struct {
+	Names *[]string `json:"names"`
+}
+
+type DeleteModelsRequest struct {
+	IDs *[]string `json:"ids"`
+}
+
 type ChatResponse struct {
 	Answer        *string `json:"answer"`
 	ReasonContent *string `json:"reason_content"`

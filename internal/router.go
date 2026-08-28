@@ -73,6 +73,10 @@ func (r *Router) Setup(e *gin.Engine) {
 			provider.PATCH("/:provider_id", r.providerHandler.UpdateProvider)
 			provider.DELETE("/:provider_id", r.providerHandler.DeleteProvider)
 
+			provider.GET("/:provider_id/models", r.modelHandler.ListProviderModel)
+			provider.POST("/:provider_id/models", r.modelHandler.SaveProviderModels)
+			provider.DELETE("/:provider_id/models", r.modelHandler.DeleteProviderModels)
+
 			provider.POST("/:provider_id/chat", r.modelHandler.ChatToModel)
 			provider.GET("/:provider_id/list", r.modelHandler.ListSupportedModels)
 		}

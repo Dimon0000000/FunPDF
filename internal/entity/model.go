@@ -1,7 +1,7 @@
 package entity
 
 type Model struct {
-	ID   string `gorm:"column:id;primaryKey;size:32" json:"id"`
+	ID   string `gorm:"column:id;primaryKey;size:36" json:"id"`
 	Name string `json:"name"`
 	BaseModel
 }
