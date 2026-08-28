@@ -43,7 +43,12 @@ func (d *ProviderDAO) CreateProvider(ctx context.Context, db *gorm.DB, req *dto.
 		APIKey:    req.APIKey,
 	}
 	err := db.WithContext(ctx).Model(&entity.Provider{}).Create(&provider).Error
-	return &provider, err
+	if err != nil {
+		return nil, err
+	}
+
+	provider.APIKey = ""
+	return &provider, nil
 }
 
 // UpdateProvider update provider
