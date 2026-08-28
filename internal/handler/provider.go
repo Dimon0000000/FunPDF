@@ -28,6 +28,7 @@ func (h *ProviderHandler) ListProviders(c *gin.Context) {
 			"code": http.StatusInternalServerError,
 			"msg":  err.Error(),
 		})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -48,7 +49,8 @@ func (h *ProviderHandler) CreateProvider(c *gin.Context) {
 		return
 	}
 
-	if err := h.providerSvr.CreateProvider(c.Request.Context(), &req); err != nil {
+	provider, err := h.providerSvr.CreateProvider(c.Request.Context(), &req)
+	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, service.ErrProviderNameRequired) || errors.Is(err, service.ErrProviderURLSuffix) {
 			status = http.StatusBadRequest
@@ -62,6 +64,7 @@ func (h *ProviderHandler) CreateProvider(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": http.StatusOK,
+		"data": provider,
 		"msg":  "success",
 	})
 }

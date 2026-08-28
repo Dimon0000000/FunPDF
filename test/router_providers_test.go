@@ -30,6 +30,9 @@ func TestRouterRegistersProviderAndModelRoutes(t *testing.T) {
 		"POST /api/providers",
 		"PATCH /api/providers/:provider_id",
 		"DELETE /api/providers/:provider_id",
+		"GET /api/providers/:provider_id/models",
+		"POST /api/providers/:provider_id/models",
+		"DELETE /api/providers/:provider_id/models",
 		"POST /api/providers/:provider_id/chat",
 		"GET /api/providers/:provider_id/list",
 	}

@@ -30,9 +30,9 @@ func (d *ProviderDAO) ListProviders(ctx context.Context, db *gorm.DB) ([]dto.Lis
 }
 
 // CreateProvider create a provider
-func (d *ProviderDAO) CreateProvider(ctx context.Context, db *gorm.DB, req *dto.CreateProviderRequest) error {
+func (d *ProviderDAO) CreateProvider(ctx context.Context, db *gorm.DB, req *dto.CreateProviderRequest) (*entity.Provider, error) {
 	if strings.TrimSpace(req.URLSuffix["chat"]) == "" || strings.TrimSpace(req.URLSuffix["models"]) == "" {
-		return errors.New("provider chat and models url suffix are required")
+		return nil, errors.New("provider chat and models url suffix are required")
 	}
 	id := common.GenerateUUIDv7()
 	provider := entity.Provider{
@@ -43,7 +43,12 @@ func (d *ProviderDAO) CreateProvider(ctx context.Context, db *gorm.DB, req *dto.
 		APIKey:    req.APIKey,
 	}
 	err := db.WithContext(ctx).Model(&entity.Provider{}).Create(&provider).Error
-	return err
+	if err != nil {
+		return nil, err
+	}
+
+	provider.APIKey = ""
+	return &provider, nil
 }
 
 // UpdateProvider update provider

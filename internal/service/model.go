@@ -17,6 +17,7 @@ import (
 )
 
 type ModelService struct {
+	modelDAO   *dao.ModelDAO
 	httpClient *http.Client
 }
 
@@ -26,10 +27,67 @@ func NewModelService() *ModelService {
 	transport.ResponseHeaderTimeout = 30 * time.Second
 
 	return &ModelService{
+		modelDAO: dao.NewModelDAO(),
 		httpClient: &http.Client{
 			Transport: transport,
 		},
 	}
+}
+
+// ListProviderModel list provider's model stored in DB
+func (s *ModelService) ListProviderModel(ctx context.Context, providerID string) (*[]dto.ListProviderModelsResponse, error) {
+	list, err := s.modelDAO.ListProviderModel(ctx, dao.DB, providerID)
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// SaveProviderModels save some models to DB
+func (s *ModelService) SaveProviderModels(ctx context.Context, providerID string, req *dto.SaveModelsRequest) (*[]entity.Model, error) {
+	if req.Names == nil {
+		return nil, errors.New("names is empty")
+	}
+	savedModelNames := make([]string, 0, len(*req.Names))
+	for _, name := range *req.Names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			savedModelNames = append(savedModelNames, name)
+		}
+	}
+
+	if len(savedModelNames) == 0 {
+		return nil, errors.New("no names provided")
+	}
+
+	modelList, err := s.modelDAO.SaveProviderModels(ctx, dao.DB, providerID, savedModelNames)
+	if err != nil {
+		return nil, err
+	}
+	return modelList, nil
+}
+
+func (s *ModelService) DeleteProviderModels(ctx context.Context, providerID string, req *dto.DeleteModelsRequest) error {
+	if req.IDs == nil {
+		return errors.New("ids is empty")
+	}
+	modelIDs := make([]string, 0, len(*req.IDs))
+	for _, id := range *req.IDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			modelIDs = append(modelIDs, id)
+		}
+	}
+
+	if len(modelIDs) == 0 {
+		return errors.New("no ids provided")
+	}
+
+	err := s.modelDAO.DeleteProviderModels(ctx, dao.DB, providerID, modelIDs)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *ModelService) ChatToModelStreamWithSender(ctx context.Context, providerID, modelName, modelID string, messages []models.Message, modelCfg models.ModelConfig, chatCfg models.ChatConfig, sender func(*string, *string) error) error {

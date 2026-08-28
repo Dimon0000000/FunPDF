@@ -3,6 +3,7 @@ package service
 import (
 	"FunPDF/internal/dao"
 	"FunPDF/internal/dto"
+	"FunPDF/internal/entity"
 	"context"
 	"errors"
 	"strings"
@@ -28,10 +29,10 @@ func (s *ProviderService) ListProviders(ctx context.Context) (*[]dto.ListProvide
 }
 
 // CreateProvider create a provider
-func (s *ProviderService) CreateProvider(ctx context.Context, req *dto.CreateProviderRequest) error {
+func (s *ProviderService) CreateProvider(ctx context.Context, req *dto.CreateProviderRequest) (*entity.Provider, error) {
 	modelName := strings.TrimSpace(req.Name)
 	if modelName == "" {
-		return ErrProviderNameRequired
+		return nil, ErrProviderNameRequired
 	}
 	req.Name = modelName
 
@@ -40,15 +41,16 @@ func (s *ProviderService) CreateProvider(ctx context.Context, req *dto.CreatePro
 	chatSuffix := strings.TrimSpace(req.URLSuffix["chat"])
 	modelsSuffix := strings.TrimSpace(req.URLSuffix["models"])
 	if chatSuffix == "" || modelsSuffix == "" {
-		return ErrProviderURLSuffix
+		return nil, ErrProviderURLSuffix
 	}
 	req.URLSuffix["chat"] = chatSuffix
 	req.URLSuffix["models"] = modelsSuffix
 
-	if err := s.providerDAO.CreateProvider(ctx, dao.DB, req); err != nil {
-		return err
+	provider, err := s.providerDAO.CreateProvider(ctx, dao.DB, req)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return provider, nil
 }
 
 // UpdateProvider update provider
