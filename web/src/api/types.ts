@@ -19,11 +19,13 @@ export interface Provider extends BaseModel {
   name: string
   enabled?: boolean
   base_url?: string
+  url?: string
+  url_suffix?: Record<string, string>
   models?: ProviderModel[]
 }
 
 export interface ProviderModel extends BaseModel {
   id: string
   name: string
-  provider_name: string
+  provider_name?: string
 }
