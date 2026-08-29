@@ -18,6 +18,7 @@ func TestRouterRegistersAlbumRoutes(t *testing.T) {
 		handler.NewTranslatorHandler(),
 		handler.NewProviderHandler(),
 		handler.NewModelHandler(),
+		handler.NewChatSessionHandler(),
 	).Setup(engine)
 
 	routes := map[string]bool{}

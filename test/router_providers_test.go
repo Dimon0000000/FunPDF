@@ -18,6 +18,7 @@ func TestRouterRegistersProviderAndModelRoutes(t *testing.T) {
 		handler.NewTranslatorHandler(),
 		handler.NewProviderHandler(),
 		handler.NewModelHandler(),
+		handler.NewChatSessionHandler(),
 	).Setup(engine)
 
 	routes := map[string]bool{}
@@ -35,6 +36,9 @@ func TestRouterRegistersProviderAndModelRoutes(t *testing.T) {
 		"DELETE /api/providers/:provider_id/models",
 		"POST /api/providers/:provider_id/chat",
 		"GET /api/providers/:provider_id/list",
+		"POST /api/providers/:provider_id/sessions",
+		"DELETE /api/providers/:provider_id/sessions/:session_id",
+		"POST /api/providers/:provider_id/sessions/:session_id/messages",
 	}
 	for _, route := range expected {
 		if !routes[route] {

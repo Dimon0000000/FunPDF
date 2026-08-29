@@ -18,10 +18,12 @@ import (
 	"FunPDF/internal"
 	"FunPDF/internal/common"
 	"FunPDF/internal/dao"
+	"FunPDF/internal/engine"
 	"FunPDF/internal/entity"
 	"FunPDF/internal/handler"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,24 +34,40 @@ func main() {
 	translatorHandler := handler.NewTranslatorHandler()
 	providerHandler := handler.NewProviderHandler()
 	modelHandler := handler.NewModelHandler()
+	chatSessionHandler := handler.NewChatSessionHandler()
 
 	r := gin.Default()
-	router := internal.NewRouter(fileHandler, albumHandler, translatorHandler, providerHandler, modelHandler)
+	router := internal.NewRouter(fileHandler, albumHandler, translatorHandler, providerHandler, modelHandler, chatSessionHandler)
 	router.Setup(r)
 
 	dsn := os.Getenv("FUNPDF_MYSQL_DSN")
 	if dsn == "" {
-		dsn = "root:password@(127.0.0.1:3306)/funpdf?charset=utf8&parseTime=True&loc=Local"
+		dsn = "root:password@(127.0.0.1:3306)/funpdf?charset=utf8mb4&parseTime=True&loc=Local"
 	}
 	if err := dao.InitMysql(dsn); err != nil {
 		log.Fatalf("initialize MySQL: %v", err)
 	}
-	if err := dao.DB.AutoMigrate(&entity.File{}, &entity.Album{}, &entity.AlbumFile{}, &entity.Translator{}, &entity.Model{}, &entity.Provider{}, &entity.ProviderModel{}); err != nil {
+	if err := dao.DB.AutoMigrate(&entity.File{}, &entity.Album{}, &entity.AlbumFile{}, &entity.Translator{}, &entity.Model{}, &entity.Provider{}, &entity.ProviderModel{}, &entity.ChatSession{}, &entity.Dialog{}); err != nil {
 		log.Fatalf("migrate file table: %v", err)
 	}
 
 	common.Banner()
 	log.Printf("FunPDF %s", common.GetVersion())
+
+	done := make(chan struct{})
+
+	ticker := time.NewTicker(time.Minute * 30)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				engine.PDFText.Clear()
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	addr := os.Getenv("FUNPDF_ADDR")
 	if addr == "" {
