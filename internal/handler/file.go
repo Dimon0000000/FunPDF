@@ -310,3 +310,21 @@ func (h *FileHandler) ListFileAlbums(c *gin.Context) {
 		"msg":  "success",
 	})
 }
+
+func (h *FileHandler) DeleteFileCache(c *gin.Context) {
+	fileID := strings.TrimSpace(c.Param("file_id"))
+	if fileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": http.StatusBadRequest,
+			"msg":  "file id is empty",
+		})
+		return
+	}
+
+	h.fileSvr.DeleteFileCache(c.Request.Context(), fileID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": http.StatusOK,
+		"msg":  "success",
+	})
+}

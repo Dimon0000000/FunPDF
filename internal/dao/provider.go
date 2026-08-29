@@ -19,6 +19,18 @@ func NewProviderDAO() *ProviderDAO {
 	return &ProviderDAO{}
 }
 
+func (d *ProviderDAO) GetProviderByID(ctx context.Context, db *gorm.DB, providerID string) (*entity.Provider, error) {
+	var provider entity.Provider
+	err := db.WithContext(ctx).
+		Where("id = ?", providerID).
+		First(&provider).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return &provider, nil
+}
+
 // ListProviders list all providers that is already in DB
 func (d *ProviderDAO) ListProviders(ctx context.Context, db *gorm.DB) ([]dto.ListProvidersResult, error) {
 	var providers []dto.ListProvidersResult

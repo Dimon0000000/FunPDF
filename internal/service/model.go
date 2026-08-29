@@ -17,8 +17,9 @@ import (
 )
 
 type ModelService struct {
-	modelDAO   *dao.ModelDAO
-	httpClient *http.Client
+	modelDAO    *dao.ModelDAO
+	providerDAO *dao.ProviderDAO
+	httpClient  *http.Client
 }
 
 func NewModelService() *ModelService {
@@ -27,7 +28,8 @@ func NewModelService() *ModelService {
 	transport.ResponseHeaderTimeout = 30 * time.Second
 
 	return &ModelService{
-		modelDAO: dao.NewModelDAO(),
+		modelDAO:    dao.NewModelDAO(),
+		providerDAO: dao.NewProviderDAO(),
 		httpClient: &http.Client{
 			Transport: transport,
 		},
@@ -115,8 +117,8 @@ func (s *ModelService) ChatToModel(ctx context.Context, providerID, modelName, m
 		return nil, ErrModelNameRequired
 	}
 
-	var provider entity.Provider
-	if err := dao.DB.WithContext(ctx).Where("id = ?", providerID).First(&provider).Error; err != nil {
+	provider, err := s.providerDAO.GetProviderByID(ctx, dao.DB, providerID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrProviderNotFound
 		}
@@ -150,8 +152,8 @@ func (s *ModelService) ListSupportedModels(ctx context.Context, providerID strin
 		return nil, ErrProviderIDRequired
 	}
 
-	var provider entity.Provider
-	if err := dao.DB.WithContext(ctx).Where("id = ?", providerID).First(&provider).Error; err != nil {
+	provider, err := s.providerDAO.GetProviderByID(ctx, dao.DB, providerID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrProviderNotFound
 		}

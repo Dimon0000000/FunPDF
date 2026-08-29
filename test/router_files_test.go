@@ -18,6 +18,7 @@ func TestRouterRegistersFileRoutes(t *testing.T) {
 		handler.NewTranslatorHandler(),
 		handler.NewProviderHandler(),
 		handler.NewModelHandler(),
+		handler.NewChatSessionHandler(),
 	).Setup(engine)
 
 	routes := map[string]bool{}
@@ -35,6 +36,7 @@ func TestRouterRegistersFileRoutes(t *testing.T) {
 		"GET /api/files/:file_id/thumbnail",
 		"PATCH /api/files/:file_id/state",
 		"GET /api/files/:file_id/album",
+		"DELETE /api/files/:file_id/cache",
 	}
 	for _, route := range expected {
 		if !routes[route] {

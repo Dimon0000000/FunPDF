@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/unidoc/unidoc/pdf/extractor"
+	"github.com/unidoc/unidoc/pdf/model"
 )
 
 /* file */
@@ -142,4 +145,51 @@ func GetLocalJsonProviders() ([]dto.ListProvidersResult, error) {
 	}
 
 	return list, nil
+}
+
+func ExtractPDFText(path string) (string, error) {
+	// open PDF
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	// Create PDF reader
+	pdfReader, err := model.NewPdfReader(file)
+	if err != nil {
+		return "", err
+	}
+
+	var text strings.Builder
+
+	// get page number
+	numPages, err := pdfReader.GetNumPages()
+	if err != nil {
+		return "", err
+	}
+
+	// iter
+	for i := 1; i <= numPages; i++ {
+		page, err := pdfReader.GetPage(i)
+		if err != nil {
+			continue
+		}
+
+		// get text
+		extractors, err := extractor.New(page)
+		if err != nil {
+			continue
+		}
+
+		content, err := extractors.ExtractText()
+		if err != nil {
+			continue
+		}
+
+		text.WriteString(content)
+		text.WriteString("\n")
+	}
+
+	return text.String(), nil
 }

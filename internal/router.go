@@ -7,21 +7,23 @@ import (
 )
 
 type Router struct {
-	fileHandler       *handler.FileHandler
-	albumHandler      *handler.AlbumHandler
-	translatorHandler *handler.TranslatorHandler
-	providerHandler   *handler.ProviderHandler
-	modelHandler      *handler.ModelHandler
+	fileHandler        *handler.FileHandler
+	albumHandler       *handler.AlbumHandler
+	translatorHandler  *handler.TranslatorHandler
+	providerHandler    *handler.ProviderHandler
+	modelHandler       *handler.ModelHandler
+	chatSessionHandler *handler.ChatSessionHandler
 }
 
 // NewRouter create a new router
-func NewRouter(fileHandler *handler.FileHandler, albumHandler *handler.AlbumHandler, translatorHandler *handler.TranslatorHandler, providerHandler *handler.ProviderHandler, modelHandler *handler.ModelHandler) *Router {
+func NewRouter(fileHandler *handler.FileHandler, albumHandler *handler.AlbumHandler, translatorHandler *handler.TranslatorHandler, providerHandler *handler.ProviderHandler, modelHandler *handler.ModelHandler, chatSessionHandler *handler.ChatSessionHandler) *Router {
 	return &Router{
-		fileHandler:       fileHandler,
-		albumHandler:      albumHandler,
-		translatorHandler: translatorHandler,
-		providerHandler:   providerHandler,
-		modelHandler:      modelHandler,
+		fileHandler:        fileHandler,
+		albumHandler:       albumHandler,
+		translatorHandler:  translatorHandler,
+		providerHandler:    providerHandler,
+		modelHandler:       modelHandler,
+		chatSessionHandler: chatSessionHandler,
 	}
 }
 
@@ -36,11 +38,13 @@ func (r *Router) Setup(e *gin.Engine) {
 
 			file.PUT("/:file_id", r.fileHandler.AlertFile)
 			file.DELETE("/:file_id", r.fileHandler.DeleteFile)
+
 			file.GET("/:file_id/content", r.fileHandler.GetFile)
 			file.GET("/:file_id/state", r.fileHandler.GetFileState)
 			file.GET("/:file_id/thumbnail", r.fileHandler.GetFileThumbnail)
 			file.PATCH("/:file_id/state", r.fileHandler.SaveFile)
 			file.GET("/:file_id/album", r.fileHandler.ListFileAlbums)
+			file.DELETE("/:file_id/cache", r.fileHandler.DeleteFileCache)
 		}
 
 		album := api.Group("/albums")
@@ -73,12 +77,22 @@ func (r *Router) Setup(e *gin.Engine) {
 			provider.PATCH("/:provider_id", r.providerHandler.UpdateProvider)
 			provider.DELETE("/:provider_id", r.providerHandler.DeleteProvider)
 
-			provider.GET("/:provider_id/models", r.modelHandler.ListProviderModel)
-			provider.POST("/:provider_id/models", r.modelHandler.SaveProviderModels)
-			provider.DELETE("/:provider_id/models", r.modelHandler.DeleteProviderModels)
-
 			provider.POST("/:provider_id/chat", r.modelHandler.ChatToModel)
 			provider.GET("/:provider_id/list", r.modelHandler.ListSupportedModels)
+
+			models := provider.Group("/:provider_id/models")
+			{
+				models.GET("", r.modelHandler.ListProviderModel)
+				models.POST("", r.modelHandler.SaveProviderModels)
+				models.DELETE("", r.modelHandler.DeleteProviderModels)
+			}
+
+			sessions := provider.Group("/:provider_id/sessions")
+			{
+				sessions.POST("", r.chatSessionHandler.SetupChatSession)
+				sessions.DELETE("/:session_id", r.chatSessionHandler.DeleteSession)
+				sessions.POST("/:session_id/messages", r.chatSessionHandler.SendMessages)
+			}
 		}
 	}
 }

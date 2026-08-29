@@ -4,6 +4,7 @@ import (
 	"FunPDF/internal/common"
 	"FunPDF/internal/dao"
 	"FunPDF/internal/dto"
+	"FunPDF/internal/engine"
 	"FunPDF/internal/entity"
 	"context"
 	"crypto/sha256"
@@ -38,7 +39,21 @@ func (s *FileService) GetFile(ctx context.Context, fileID string) (string, error
 		return "", err
 	}
 
-	return filepath.Join(s.cacheDir, fileRecord.FileStorageKey, "source.pdf"), nil
+	filePath := filepath.Join(s.cacheDir, fileRecord.FileStorageKey, "source.pdf")
+	go func(fileID, path string) {
+		if _, ok := engine.PDFText.Get(fileID); ok {
+			return
+		}
+
+		text, err := ExtractPDFText(path)
+		if err != nil {
+			common.Warn(fmt.Sprintf("extract text failed: %v", err))
+			return
+		}
+		engine.PDFText.Set(fileID, text)
+	}(fileID, filePath)
+
+	return filePath, nil
 }
 
 // GetFileState get file state
@@ -284,6 +299,7 @@ func (s *FileService) DeleteFile(ctx context.Context, fileID string) (int64, err
 	}
 
 	_ = os.RemoveAll(trashPath)
+	engine.PDFText.Delete(fileID)
 	return affected, nil
 }
 
@@ -294,4 +310,8 @@ func (s *FileService) ListFileAlbums(ctx context.Context, fileID string) ([]enti
 		return nil, err
 	}
 	return albums, nil
+}
+
+func (s *FileService) DeleteFileCache(ctx context.Context, fileID string) {
+	engine.PDFText.Delete(strings.TrimSpace(fileID))
 }
