@@ -1197,6 +1197,8 @@ async function translateSelectedText() {
   const deeplFormality = localStorage.getItem('funpdf.deepl.formality') || 'default'
   const deeplPreserveFormatting = localStorage.getItem('funpdf.deepl.preserveFormatting') === 'true'
   const googleFormat = localStorage.getItem('funpdf.google.format') || 'text'
+  const azureTextType = localStorage.getItem('funpdf.azure.textType') || 'plain'
+  const azureScript = localStorage.getItem('funpdf.azure.script') || ''
   const quoteRects = textSelection.value.rects.map(clientRect => {
     const rect = viewportRect(clientRect, page)
     return {
@@ -1241,7 +1243,9 @@ async function translateSelectedText() {
           ? { model_type: deeplModelType, formality: deeplFormality, preserve_formatting: deeplPreserveFormatting }
           : translator === 'google'
             ? { format: googleFormat }
-            : {},
+            : translator === 'azure'
+              ? { textType: azureTextType, script: azureScript.trim() || undefined }
+              : {},
     })
     translationPopup.value.result = response.translated_text
   } catch (requestError) {

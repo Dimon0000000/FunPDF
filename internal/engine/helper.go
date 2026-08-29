@@ -9,7 +9,7 @@ import (
 )
 
 func loadTranslatorConfig(name string) (json.RawMessage, error) {
-	data, err := os.ReadFile(fmt.Sprintf("conf/%s.json", name))
+	data, err := os.ReadFile(fmt.Sprintf("conf/translators/%s.json", name))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}

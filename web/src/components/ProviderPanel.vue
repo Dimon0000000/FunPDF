@@ -58,7 +58,8 @@ function providerId(name: string) {
 }
 
 function isDefaultProvider(name: string) {
-  return providerId(name) === defaultProviderId.value
+  const id = providerId(name)
+  return Boolean(id) && id === defaultProviderId.value
 }
 
 async function refresh() {

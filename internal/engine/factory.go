@@ -23,10 +23,10 @@ func NewTranslatorFactory() *TranslatorFactory {
 
 func (t *TranslatorFactory) GetTranslator(ctx context.Context, db *gorm.DB, translatorName, region string) (Translator, error) {
 	if translatorName == "" {
-		return nil, errors.New("translator name is required")
+		return nil, errors.New("translators name is required")
 	}
 
-	// get translator params from DB
+	// get translators params from DB
 	params, err := t.translatorDAO.GetTranslatorParams(ctx, db, translatorName)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func (t *TranslatorFactory) GetTranslator(ctx context.Context, db *gorm.DB, tran
 		return nil, err
 	}
 
-	// create translator instance by name
+	// create translators instance by name
 	switch translatorName {
 	case "baidu":
 		apiKey, ok := param["api_key"].(string)
@@ -73,7 +73,17 @@ func (t *TranslatorFactory) GetTranslator(ctx context.Context, db *gorm.DB, tran
 		}
 
 		return translator.NewGoogleTranslator(apiKey, url), nil
+	case "azure":
+		apiKey, ok := param["api_key"].(string)
+		if !ok {
+			return nil, errors.New("api_key is invalid")
+		}
+		apiRegion, ok := param["region"].(string)
+		if !ok {
+			return nil, errors.New("region is invalid")
+		}
+		return translator.NewAzureTranslator(apiKey, apiRegion, url), nil
 	default:
-		return nil, fmt.Errorf("unsupported translator: %s", translatorName)
+		return nil, fmt.Errorf("unsupported translators: %s", translatorName)
 	}
 }

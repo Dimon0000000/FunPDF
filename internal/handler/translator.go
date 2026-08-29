@@ -37,7 +37,7 @@ func (h *TranslatorHandler) ListTranslators(c *gin.Context) {
 	})
 }
 
-// CreateTranslator create a unique translator
+// CreateTranslator create a unique translators
 func (h *TranslatorHandler) CreateTranslator(c *gin.Context) {
 	var req *dto.CreateTranslatorsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -70,7 +70,7 @@ func (h *TranslatorHandler) Translate(c *gin.Context) {
 	if translatorName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    http.StatusBadRequest,
-			"message": "translator name is required",
+			"message": "translators name is required",
 		})
 		return
 	}

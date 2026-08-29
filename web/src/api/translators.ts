@@ -43,15 +43,22 @@ export async function createTranslator(payload: CreateTranslatorRequest) {
 
 export function normalizeTranslatorName(name: string) {
   const normalized = name.trim().toLowerCase().replace(/_/g, '-')
-  if (normalized === 'baidu' || normalized === 'baidu-translator' || normalized === 'baidutranslator') return 'baidu'
-  if (normalized === 'deepl' || normalized === 'deepl-translator' || normalized === 'deep-l-translator' || normalized === 'deepltranslator') return 'deepl'
-  if (normalized === 'google' || normalized === 'google-translator' || normalized === 'googletranslator') return 'google'
+  if (normalized === 'baidu' || normalized === 'baidu-translators' || normalized === 'baidutranslator') return 'baidu'
+  if (normalized === 'deepl' || normalized === 'deepl-translators' || normalized === 'deep-l-translators' || normalized === 'deepltranslator') return 'deepl'
+  if (normalized === 'google' || normalized === 'google-translators' || normalized === 'googletranslator') return 'google'
+  if (normalized === 'azure' || normalized === 'azure-translators' || normalized === 'azuretranslator' || normalized === 'microsoft-translator') return 'azure'
   return normalized
 }
 
 function toBackendLanguageCode(language: string, translatorName: string) {
   const normalized = language.trim()
-  if (normalizeTranslatorName(translatorName) === 'deepl') {
+  const translator = normalizeTranslatorName(translatorName)
+  if (translator === 'azure') {
+    if (normalized === 'zh' || normalized === 'zh-CN' || normalized === 'zh-Hans') return 'zh-Hans'
+    if (normalized === 'zh-TW' || normalized === 'zh-HK' || normalized === 'zh-Hant') return 'zh-Hant'
+    return normalized
+  }
+  if (translator === 'deepl') {
     if (normalized === 'zh-CN' || normalized === 'zh-Hans') return 'zh'
     return normalized.toLowerCase()
   }
