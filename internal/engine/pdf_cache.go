@@ -50,10 +50,20 @@ func (c *PDFTextCache) Set(fileID, text string) {
 	defer c.mu.Unlock()
 }
 
+// Delete one expired file
 func (c *PDFTextCache) Delete(fileID string) bool {
 	c.mu.Lock()
 	_, ok := c.items[fileID]
 	delete(c.items, fileID)
 	c.mu.Unlock()
 	return ok
+}
+
+// Clear expired file
+func (c *PDFTextCache) Clear() {
+	for fileID := range c.items {
+		if c.items[fileID].ExpireAt.IsZero() || time.Now().After(c.items[fileID].ExpireAt) {
+			c.Delete(fileID)
+		}
+	}
 }
