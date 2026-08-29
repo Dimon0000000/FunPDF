@@ -2,6 +2,7 @@ package engine
 
 import (
 	"FunPDF/internal/dao"
+	"FunPDF/internal/engine/translator"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,7 +37,7 @@ func (t *TranslatorFactory) GetTranslator(ctx context.Context, db *gorm.DB, tran
 		return nil, err
 	}
 
-	url, err := translatorConfigURL(translatorName, region)
+	url, err := TranslatorConfigURL(translatorName, region)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +54,7 @@ func (t *TranslatorFactory) GetTranslator(ctx context.Context, db *gorm.DB, tran
 			return nil, errors.New("app_id is invalid")
 		}
 
-		return NewBaiduTranslator(apiKey, appID, url), nil
+		return translator.NewBaiduTranslator(apiKey, appID, url), nil
 	case "deepl":
 		apiKey, ok := param["api_key"].(string)
 		if !ok {
@@ -64,14 +65,14 @@ func (t *TranslatorFactory) GetTranslator(ctx context.Context, db *gorm.DB, tran
 			return nil, fmt.Errorf("region %s not supported for %s", region, translatorName)
 		}
 
-		return NewDeeplTranslator(apiKey, url), nil
+		return translator.NewDeeplTranslator(apiKey, url), nil
 	case "google":
 		apiKey, ok := param["api_key"].(string)
 		if !ok {
 			return nil, errors.New("api_key is invalid")
 		}
 
-		return NewGoogleTranslator(apiKey, url), nil
+		return translator.NewGoogleTranslator(apiKey, url), nil
 	default:
 		return nil, fmt.Errorf("unsupported translator: %s", translatorName)
 	}

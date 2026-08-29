@@ -1,4 +1,4 @@
-package engine
+package translator
 
 import (
 	"FunPDF/internal/common"
@@ -48,7 +48,7 @@ func (d *DeeplTranslator) Translate(ctx context.Context, from, to, q string, par
 	if q == "" {
 		return "", errors.New("the text is empty")
 	}
-	reqBody["text"] = []string{ConcatenatingStrings(q)}
+	reqBody["text"] = []string{common.ConcatenatingStrings(q)}
 
 	if from != "" {
 		reqBody["source_lang"] = from

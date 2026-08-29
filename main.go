@@ -21,8 +21,13 @@ import (
 	"FunPDF/internal/engine"
 	"FunPDF/internal/entity"
 	"FunPDF/internal/handler"
+	"context"
+	"errors"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -73,7 +78,24 @@ func main() {
 	if addr == "" {
 		addr = ":9384"
 	}
-	if err := r.Run(addr); err != nil {
-		log.Fatalf("start backend: %v", err)
+
+	srv := &http.Server{Addr: addr, Handler: r}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("start backend: %v", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	log.Println("shutting down...")
+	close(done)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown error: %v", err)
 	}
 }

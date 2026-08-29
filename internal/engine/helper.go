@@ -8,11 +8,6 @@ import (
 	"strings"
 )
 
-func ConcatenatingStrings(str string) string {
-	parts := strings.Split(str, "\n")
-	return strings.Join(parts, "")
-}
-
 func loadTranslatorConfig(name string) (json.RawMessage, error) {
 	data, err := os.ReadFile(fmt.Sprintf("conf/%s.json", name))
 	if err != nil {
@@ -21,7 +16,7 @@ func loadTranslatorConfig(name string) (json.RawMessage, error) {
 	return data, nil
 }
 
-func translatorConfigURL(translatorName, region string) (string, error) {
+func TranslatorConfigURL(translatorName, region string) (string, error) {
 	config, err := loadTranslatorConfig(translatorName)
 	if err != nil {
 		return "", err
