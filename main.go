@@ -18,10 +18,12 @@ import (
 	"FunPDF/internal"
 	"FunPDF/internal/common"
 	"FunPDF/internal/dao"
+	"FunPDF/internal/engine"
 	"FunPDF/internal/entity"
 	"FunPDF/internal/handler"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,6 +53,21 @@ func main() {
 
 	common.Banner()
 	log.Printf("FunPDF %s", common.GetVersion())
+
+	done := make(chan struct{})
+
+	ticker := time.NewTicker(time.Minute * 30)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				engine.PDFText.Clear()
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	addr := os.Getenv("FUNPDF_ADDR")
 	if addr == "" {
