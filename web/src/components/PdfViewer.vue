@@ -1,4 +1,4 @@
-<script setup lang="ts">
+p<script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -13,6 +13,7 @@ import {
   getCachedEditorState,
   getCachedFileContent,
   saveEditorState,
+  deleteFileCache,
   type CachedFile,
 } from '@/api/files'
 import { apiErrorMessage } from '@/api/http'
@@ -265,6 +266,8 @@ function createTab(name: string, bytes: Uint8Array) {
   }
   openTabs.value.push(tab)
   activeTabId.value = tab.id
+  store.activeDocumentId = tab.id
+  store.activeCachedFileId = tab.cachedFileId
   if (tab.cachedFileId) startAutosave(tab)
   return tab
 }
@@ -314,6 +317,8 @@ async function activateTab(tabId: string) {
   if (!tab) return
   snapshotActiveTab()
   activeTabId.value = tab.id
+  store.activeDocumentId = tab.id
+  store.activeCachedFileId = tab.cachedFileId
   loading.value = true
   clearTextSelection(true)
   try {
@@ -350,6 +355,8 @@ async function closeTab(tabId: string) {
   if (tab.cachedFileId && tab.dirty) await autosaveTab(tab.id)
   stopAutosave(tab)
   openTabs.value = openTabs.value.filter(item => item.id !== tab.id)
+  window.dispatchEvent(new CustomEvent('funpdf:document-closed', { detail: { documentId: tab.id, fileId: tab.cachedFileId } }))
+  if (tab.cachedFileId) void deleteFileCache(tab.cachedFileId).catch(() => undefined)
 }
 
 async function openFileDialog() {
@@ -574,10 +581,14 @@ async function closeDocument() {
     stopAutosave(closingTab)
     const closedIndex = openTabs.value.findIndex(tab => tab.id === closingTab.id)
     openTabs.value = openTabs.value.filter(tab => tab.id !== closingTab.id)
+    window.dispatchEvent(new CustomEvent('funpdf:document-closed', { detail: { documentId: closingTab.id, fileId: closingTab.cachedFileId } }))
+    if (closingTab.cachedFileId) void deleteFileCache(closingTab.cachedFileId).catch(() => undefined)
     const nextTab = openTabs.value[Math.max(0, Math.min(closedIndex, openTabs.value.length - 1))]
     if (nextTab) {
       resetOpenedDocument()
       activeTabId.value = ''
+      store.activeDocumentId = ''
+      store.activeCachedFileId = ''
       await activateTab(nextTab.id)
       return true
     }
@@ -585,6 +596,8 @@ async function closeDocument() {
 
   resetOpenedDocument()
   activeTabId.value = ''
+  store.activeDocumentId = ''
+  store.activeCachedFileId = ''
   return true
 }
 
@@ -1238,6 +1251,26 @@ async function translateSelectedText() {
   }
 }
 
+function askAIAboutSelection() {
+  const sourceText = textSelection.value.text.trim()
+  if (!sourceText) return
+  store.openAIChat(sourceText)
+  clearTextSelection(true)
+}
+
+async function getDocumentContext() {
+  const document = pdfDocument.value
+  if (!document || !store.documentName) return undefined
+  const pages: string[] = []
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
+    const page = await document.getPage(pageNumber)
+    const content = await page.getTextContent()
+    const text = content.items.map(item => 'str' in item ? item.str : '').join(' ')
+    pages.push(`Page ${pageNumber}\n${text}`)
+  }
+  return { name: store.documentName, content: pages.join('\n\n') }
+}
+
 function saveTranslationResult() {
   const page = translationPopup.value.page
   const translatedText = translationPopup.value.result.trim()
@@ -1607,6 +1640,7 @@ async function saveProject(options: { quiet?: boolean; thumbnail?: string } = {}
     cachedFileId = cached.id
     cachedFileRevision = cached.revision
     cachedFileSha256 = cached.sha256
+    store.activeCachedFileId = cachedFileId
     store.dirty = false
     snapshotActiveTab()
     const tab = activeTab()
@@ -1666,7 +1700,7 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = ''
 }
 
-defineExpose({ openFileDialog, closeDocument, rotate, fitWidth, undo, redo, clearAnnotations, saveProject, exportPdf, printPdf })
+defineExpose({ openFileDialog, closeDocument, rotate, fitWidth, undo, redo, clearAnnotations, saveProject, exportPdf, printPdf, getDocumentContext })
 
 watch(() => store.scale, () => void refreshPageFlow(true))
 watch(() => store.dirty, dirty => {
@@ -1816,6 +1850,7 @@ onBeforeUnmount(() => {
             <button @click="highlightSelectedText"><i class="fa-solid fa-highlighter"></i>高亮</button>
             <button @click="openSelectedTextNoteEditor"><i class="fa-regular fa-note-sticky"></i>便签</button>
             <button @click="translateSelectedText"><i class="fa-solid fa-language"></i>翻译</button>
+            <button @click="askAIAboutSelection"><i class="fa-regular fa-comments"></i>问 AI</button>
           </div>
 
           <div
