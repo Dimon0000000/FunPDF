@@ -32,15 +32,15 @@ func (s *TranslatorService) ListTranslators(ctx context.Context) ([]*entity.Tran
 	return list, nil
 }
 
-// CreateTranslator create a unique translator
+// CreateTranslator create a unique translators
 func (s *TranslatorService) CreateTranslator(ctx context.Context, req *dto.CreateTranslatorsRequest) (*entity.Translator, error) {
 	translatorName := strings.ToLower(strings.TrimSpace(req.Name))
 	if translatorName == "" {
-		return nil, errors.New("translator name is required")
+		return nil, errors.New("translators name is required")
 	}
 
 	if len(req.Params) == 0 {
-		return nil, errors.New("translator params is required")
+		return nil, errors.New("translators params is required")
 	}
 
 	translator, err := s.translatorDAO.CreateTranslator(ctx, dao.DB, translatorName, req.Params)
@@ -85,7 +85,7 @@ func (s *TranslatorService) Translate(ctx context.Context, req *dto.TranslateReq
 	translator, err := s.translatorFct.GetTranslator(ctx, dao.DB, translatorName, region)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", errors.New("translator not found")
+			return "", errors.New("translators not found")
 		}
 		return "", err
 	}

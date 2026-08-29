@@ -17,7 +17,7 @@ func NewTranslatorDAO() *TranslatorDAO {
 	return &TranslatorDAO{}
 }
 
-// GetTranslatorParams get translator's params by translator name
+// GetTranslatorParams get translators's params by translators name
 func (d *TranslatorDAO) GetTranslatorParams(ctx context.Context, db *gorm.DB, name string) (json.RawMessage, error) {
 	var translator *entity.Translator
 	if err := db.WithContext(ctx).First(&translator, "name = ?", name).Error; err != nil {
@@ -25,7 +25,7 @@ func (d *TranslatorDAO) GetTranslatorParams(ctx context.Context, db *gorm.DB, na
 	}
 	params := translator.Params
 	if len(params) == 0 {
-		return nil, fmt.Errorf("translator's params has no value, please rebuild the translator: %s", name)
+		return nil, fmt.Errorf("translators's params has no value, please rebuild the translators: %s", name)
 	}
 	return params, nil
 }
@@ -40,12 +40,12 @@ func (d *TranslatorDAO) ListTranslators(ctx context.Context, db *gorm.DB) ([]*en
 	return translators, nil
 }
 
-// CreateTranslator create a unique translator
+// CreateTranslator create a unique translators
 func (d *TranslatorDAO) CreateTranslator(ctx context.Context, db *gorm.DB, translatorName string, params json.RawMessage) (*entity.Translator, error) {
 	var existing entity.Translator
 	err := db.WithContext(ctx).Where("name = ?", translatorName).First(&existing).Error
 	if err == nil {
-		return nil, fmt.Errorf("translator with name %s already exists", translatorName)
+		return nil, fmt.Errorf("translators with name %s already exists", translatorName)
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err

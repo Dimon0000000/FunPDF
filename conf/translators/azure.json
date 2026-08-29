@@ -1,0 +1,6 @@
+{
+  "name": "azure",
+  "url": {
+    "default": "https://api.cognitive.microsofttranslator.com/translate?api-version="
+  }
+}

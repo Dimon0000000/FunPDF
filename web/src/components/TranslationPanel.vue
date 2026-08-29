@@ -4,12 +4,13 @@ import { apiErrorMessage } from '@/api/http'
 import { completeTranslation, createTranslator, listTranslators, normalizeTranslatorName, type Translator } from '@/api/translators'
 import { useReaderStore } from '@/stores/reader'
 
-type TranslatorType = 'baidu' | 'deepl' | 'google'
+type TranslatorType = 'baidu' | 'deepl' | 'google' | 'azure'
 
 const translatorTypes: Array<{ name: TranslatorType; label: string }> = [
   { name: 'baidu', label: 'Baidu Translator' },
   { name: 'deepl', label: 'DeepL Translator' },
   { name: 'google', label: 'Google Translator' },
+  { name: 'azure', label: 'Azure Translator' },
 ]
 
 const store = useReaderStore()
@@ -26,6 +27,8 @@ const deeplModelType = ref(localStorage.getItem('funpdf.deepl.modelType') || 'pr
 const deeplFormality = ref(localStorage.getItem('funpdf.deepl.formality') || 'default')
 const deeplPreserveFormatting = ref(localStorage.getItem('funpdf.deepl.preserveFormatting') === 'true')
 const googleFormat = ref(localStorage.getItem('funpdf.google.format') || 'text')
+const azureTextType = ref(localStorage.getItem('funpdf.azure.textType') || 'plain')
+const azureScript = ref(localStorage.getItem('funpdf.azure.script') || '')
 const result = ref('')
 const loading = ref(false)
 const configLoading = ref(false)
@@ -50,6 +53,10 @@ function fieldsFor(type: TranslatorType) {
   if (type === 'google') return [
     { key: 'api_key', label: 'Google API Key', type: 'password', placeholder: 'Google Cloud Translation API Key' },
   ]
+  if (type === 'azure') return [
+    { key: 'api_key', label: 'Azure API Key', type: 'password', placeholder: 'Azure Translator subscription key' },
+    { key: 'region', label: 'Azure Region', type: 'text', placeholder: '例如 eastasia、eastus、westeurope' },
+  ]
   return []
 }
 
@@ -68,6 +75,8 @@ function persistRuntimeConfig() {
   localStorage.setItem('funpdf.deepl.formality', deeplFormality.value)
   localStorage.setItem('funpdf.deepl.preserveFormatting', String(deeplPreserveFormatting.value))
   localStorage.setItem('funpdf.google.format', googleFormat.value)
+  localStorage.setItem('funpdf.azure.textType', azureTextType.value)
+  localStorage.setItem('funpdf.azure.script', azureScript.value)
 }
 
 function resetCredentialDraft() {
@@ -145,6 +154,14 @@ function runtimeOptions() {
       },
     }
   }
+  if (currentTranslatorType.value === 'azure') {
+    return {
+      params: {
+        textType: azureTextType.value,
+        script: azureScript.value.trim() || undefined,
+      },
+    }
+  }
   return { params: {} }
 }
 
@@ -167,7 +184,7 @@ async function translate() {
 }
 
 watch(translator, persistTranslator)
-watch([sourceLanguage, targetLanguage, modelType, reference, deeplRegion, deeplModelType, deeplFormality, deeplPreserveFormatting, googleFormat], persistRuntimeConfig)
+watch([sourceLanguage, targetLanguage, modelType, reference, deeplRegion, deeplModelType, deeplFormality, deeplPreserveFormatting, googleFormat, azureTextType, azureScript], persistRuntimeConfig)
 onMounted(() => void refreshTranslators())
 </script>
 
@@ -233,6 +250,10 @@ onMounted(() => void refreshTranslators())
       </template>
       <template v-else-if="currentTranslatorType === 'google'">
         <label>格式<select v-model="googleFormat"><option value="text">text</option><option value="html">html</option></select></label>
+      </template>
+      <template v-else-if="currentTranslatorType === 'azure'">
+        <label>Text type<select v-model="azureTextType"><option value="plain">plain</option><option value="html">html</option></select></label>
+        <label>Script<input v-model="azureScript" placeholder="可选，例如 Latn" /></label>
       </template>
     </section>
 
