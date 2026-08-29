@@ -135,6 +135,9 @@ function chooseTool(tool: ToolType) {
       <button class="icon-button" :disabled="!hasDocument" title="关闭文件并更新缩略图" @click="emit('closeFile')">
         <i class="fa-solid fa-xmark"></i>
       </button>
+      <button class="icon-button" :class="{ active: store.aiPanelOpen }" :disabled="!hasDocument" title="AI Chat" @click="store.aiPanelOpen ? store.closeAIChat() : store.openAIChat()">
+        <i class="fa-regular fa-comments"></i>
+      </button>
       <button class="icon-button" :disabled="!hasDocument" title="保存可编辑工程（Ctrl+S）" @click="emit('saveProject')">
         <i class="fa-regular fa-floppy-disk"></i>
       </button>

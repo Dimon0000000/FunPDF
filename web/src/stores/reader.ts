@@ -32,6 +32,10 @@ export const useReaderStore = defineStore('reader', {
     statusMessage: '',
     selectedText: '',
     pageThumbnails: {} as Record<number, string>,
+    activeDocumentId: '',
+    activeCachedFileId: '',
+    aiPanelOpen: false,
+    aiQuote: '',
   }),
   actions: {
     toggleSidebar() {
@@ -70,6 +74,16 @@ export const useReaderStore = defineStore('reader', {
       this.statusMessage = ''
       this.selectedText = ''
       this.pageThumbnails = {}
+      this.activeDocumentId = ''
+      this.activeCachedFileId = ''
+      this.aiQuote = ''
+    },
+    openAIChat(quote = '') {
+      this.aiPanelOpen = true
+      this.aiQuote = quote
+    },
+    closeAIChat() {
+      this.aiPanelOpen = false
     },
   },
 })

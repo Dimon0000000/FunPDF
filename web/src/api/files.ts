@@ -35,6 +35,10 @@ export async function deleteFile(fileId: string) {
   await http.delete(`/files/${encodeURIComponent(fileId)}`)
 }
 
+export async function deleteFileCache(fileId: string) {
+  await http.delete(`/files/${encodeURIComponent(fileId)}/cache`)
+}
+
 export async function listFileAlbums(fileId: string) {
   const response = await http.get<Album[] | { code: number; data: Album[] }>(
     `/files/${encodeURIComponent(fileId)}/album`,

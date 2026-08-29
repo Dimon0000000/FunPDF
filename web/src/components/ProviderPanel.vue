@@ -38,6 +38,7 @@ const saving = ref(false)
 const loadingModels = ref(false)
 const error = ref('')
 const notice = ref('')
+const defaultProviderId = ref(localStorage.getItem('funpdf.defaultProviderId') || '')
 
 const selectedPreset = computed(() => presets.find(item => item.name === selectedName.value) ?? null)
 const selectedModels = computed(() => selectedName.value ? providerModels.value[selectedName.value] ?? [] : [])
@@ -54,6 +55,10 @@ function isCreated(name: string) {
 
 function providerId(name: string) {
   return providers.value.find(item => sameName(item.name, name))?.id || ''
+}
+
+function isDefaultProvider(name: string) {
+  return providerId(name) === defaultProviderId.value
 }
 
 async function refresh() {
@@ -144,6 +149,20 @@ async function addModel(modelName: string) {
   }
 }
 
+function setDefaultProvider() {
+  if (!selectedName.value) return
+  const id = providerId(selectedName.value)
+  const model = selectedModels.value[0]
+  if (!id || !model?.id) return
+  localStorage.setItem('funpdf.defaultProviderId', id)
+  localStorage.setItem('funpdf.defaultProviderName', selectedName.value)
+  localStorage.setItem('funpdf.defaultModelId', model.id)
+  localStorage.setItem('funpdf.defaultModelName', model.name)
+  defaultProviderId.value = id
+  notice.value = '已设为默认 AI 服务商'
+  window.dispatchEvent(new Event('funpdf:default-provider-changed'))
+}
+
 async function removeModel(model: ProviderModel) {
   if (!selectedName.value) return
   const id = providerId(selectedName.value)
@@ -176,7 +195,7 @@ onMounted(refresh)
         v-for="provider in visibleProviders"
         :key="provider.name"
         class="provider-card"
-        :class="{ active: selectedName === provider.name }"
+        :class="{ active: selectedName === provider.name, default: isDefaultProvider(provider.name) }"
         @click="selectProvider(provider)"
       >
         <span v-if="isCreated(provider.name)" class="status-dot" title="已创建"></span>
@@ -184,7 +203,7 @@ onMounted(refresh)
           <img class="provider-logo" :src="provider.logo" alt="" />
           <strong>{{ provider.name }}</strong>
         </span>
-        <small>{{ (providerModels[provider.name] ?? []).length }} 个模型</small>
+        <small>{{ isDefaultProvider(provider.name) ? '默认 · ' : '' }}{{ (providerModels[provider.name] ?? []).length }} 个模型</small>
       </button>
     </div>
 
@@ -215,6 +234,10 @@ onMounted(refresh)
       <button class="primary" :disabled="saving || !baseUrl.trim() || !apiKey.trim()" @click="save">
         <i :class="saving ? 'fa-solid fa-circle-notch fa-spin' : 'fa-regular fa-floppy-disk'"></i>
         保存配置
+      </button>
+      <button class="secondary" :disabled="!isCreated(selectedPreset.name) || !selectedModels.length || isDefaultProvider(selectedPreset.name)" @click="setDefaultProvider">
+        <i class="fa-regular fa-circle-check"></i>
+        {{ isDefaultProvider(selectedPreset.name) ? '当前默认服务商' : '设为默认服务商' }}
       </button>
 
       <div class="model-header">
@@ -263,6 +286,7 @@ button:disabled { opacity: .45; cursor: default; }
 .provider-grid { display: grid; gap: 7px; }
 .provider-card { position: relative; min-height: 54px; padding: 9px 10px; display: grid; gap: 4px; text-align: left; background: #eee; }
 .provider-card.active { background: #e3e7eb; box-shadow: inset 2px 0 0 #515961; }
+.provider-card.default { box-shadow: inset 0 0 0 1px #8ec7a0; }
 .provider-card strong { font-size: 12px; }
 .provider-card small { color: #8b8f94; font-size: 10px; }
 .provider-title { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
@@ -276,6 +300,8 @@ label { display: grid; gap: 5px; color: #66707a; font-size: 10px; }
 input, select { width: 100%; height: 34px; border: 1px solid #d8d8d8; border-radius: 7px; padding: 0 8px; background: white; color: #40454a; outline: none; font-size: 12px; }
 .primary { height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: #4a4f55; color: white; }
 .primary:hover:not(:disabled) { background: #353a40; }
+.secondary { height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: #edf3ee; color: #315d3c; font-size: 11px; }
+.secondary:hover:not(:disabled) { background: #dfece2; }
 .model-header { margin-top: 5px; padding-top: 9px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e1e1e1; }
 .model-header button { height: 30px; padding: 0 9px; display: flex; align-items: center; gap: 6px; font-size: 10px; }
 .selected-models { display: flex; flex-wrap: wrap; gap: 5px; }

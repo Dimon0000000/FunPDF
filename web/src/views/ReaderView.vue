@@ -3,8 +3,11 @@ import { ref } from 'vue'
 import LeftSidebar from '@/components/LeftSidebar.vue'
 import PdfViewer from '@/components/PdfViewer.vue'
 import TopNavBar from '@/components/TopNavBar.vue'
+import AIChatPanel from '@/components/AIChatPanel.vue'
+import { useReaderStore } from '@/stores/reader'
 
 const viewerRef = ref<InstanceType<typeof PdfViewer> | null>(null)
+const store = useReaderStore()
 
 function openFile() {
   viewerRef.value?.openFileDialog()
@@ -66,6 +69,7 @@ function printPdf() {
     <section class="reader-body">
       <LeftSidebar />
       <PdfViewer ref="viewerRef" />
+      <AIChatPanel v-show="store.aiPanelOpen && store.totalPages" />
     </section>
   </main>
 </template>
@@ -83,7 +87,12 @@ function printPdf() {
 .reader-body {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
+  position: relative;
+}
+
+.reader-body > :deep(.viewer) {
+  flex: 1;
+  min-width: 0;
 }
 </style>
