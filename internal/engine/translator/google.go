@@ -1,4 +1,4 @@
-package engine
+package translator
 
 import (
 	"FunPDF/internal/common"
@@ -32,7 +32,7 @@ func NewGoogleTranslator(apiKey, url string) *GoogleTranslator {
 }
 
 func (g *GoogleTranslator) Translate(ctx context.Context, from, to, q string, params json.RawMessage) (string, error) {
-	q = ConcatenatingStrings(q)
+	q = common.ConcatenatingStrings(q)
 
 	client, err := translate.NewClient(ctx, option.WithAPIKey(g.APIKey))
 	if err != nil {

@@ -1,4 +1,4 @@
-package engine
+package translator
 
 import (
 	"FunPDF/internal/common"
@@ -45,7 +45,7 @@ func (b *BaiduTranslator) Translate(ctx context.Context, from, to, q string, par
 	if len(q) > 6000 {
 		return "", errors.New("the text is too long, it needs to smaller than 6000")
 	}
-	reqBody["q"] = ConcatenatingStrings(q)
+	reqBody["q"] = common.ConcatenatingStrings(q)
 
 	if from != "" {
 		reqBody["from"] = from
