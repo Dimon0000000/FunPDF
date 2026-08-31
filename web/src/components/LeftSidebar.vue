@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useReaderStore } from '@/stores/reader'
+import { useReaderStore, type ReaderFeatureKey } from '@/stores/reader'
 import type { SidebarItem } from '@/types/pdf'
 import ProjectPanel from '@/components/ProjectPanel.vue'
 import ProviderPanel from '@/components/ProviderPanel.vue'
@@ -20,6 +20,19 @@ const items: SidebarItem[] = [
   { id: 'references', label: '参考文献', icon: 'fa-solid fa-link' },
   { id: 'ai', label: 'AI', icon: 'fa-solid fa-wand-magic-sparkles' },
 ]
+const settingsItem: SidebarItem = { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' }
+const featureOptions: Array<{ key: ReaderFeatureKey; label: string; description: string; icon: string }> = [
+  { key: 'aiChat', label: 'AI Chat', description: '顶部 AI 按钮、右侧对话栏、选区问 AI、AI 服务商入口', icon: 'fa-regular fa-comments' },
+  { key: 'translation', label: 'Translator', description: '翻译配置页、选区翻译、翻译弹窗', icon: 'fa-solid fa-language' },
+  { key: 'notes', label: '便签', description: '便签工具、选区便签、便签侧栏和页面便签标记', icon: 'fa-regular fa-note-sticky' },
+]
+const visibleItems = computed(() => items.filter(item => {
+  if (item.id === 'ai') return store.featureFlags.aiChat
+  if (item.id === 'translation') return store.featureFlags.translation
+  if (item.id === 'annotations') return store.featureFlags.notes
+  return true
+}))
+const allItems = computed(() => [...visibleItems.value, settingsItem])
 
 function selectItem(id: string) {
   if (store.activeSidebar === id && store.sidebarOpen) store.setSidebarOpen(false)
@@ -90,7 +103,7 @@ function handleSidebarWheel(event: WheelEvent) {
     </button>
     <nav class="rail" aria-label="文档导航">
       <button
-        v-for="item in items"
+        v-for="item in visibleItems"
         :key="item.id"
         class="rail-button"
         :class="{ active: store.activeSidebar === item.id && store.sidebarOpen }"
@@ -102,13 +115,21 @@ function handleSidebarWheel(event: WheelEvent) {
           {{ store.noteCount > 99 ? '99+' : store.noteCount }}
         </span>
       </button>
+      <button
+        class="rail-button rail-settings"
+        :class="{ active: store.activeSidebar === 'settings' && store.sidebarOpen }"
+        title="设置"
+        @click="selectItem('settings')"
+      >
+        <i class="fa-solid fa-gear"></i>
+      </button>
     </nav>
 
     <transition name="sidebar">
       <section v-if="store.sidebarOpen" class="sidebar-panel" :style="sidebarPanelStyle" @wheel="handleSidebarWheel">
         <div class="panel-header">
           <div>
-            <div class="panel-title">{{ items.find(item => item.id === store.activeSidebar)?.label }}</div>
+            <div class="panel-title">{{ allItems.find(item => item.id === store.activeSidebar)?.label }}</div>
             <div class="panel-subtitle">{{ store.documentName || 'FunPDF' }}</div>
           </div>
           <button class="close-button" title="关闭" @click="store.setSidebarOpen(false)">
@@ -142,7 +163,7 @@ function handleSidebarWheel(event: WheelEvent) {
           </button>
         </div>
 
-        <div v-else-if="store.activeSidebar === 'annotations'" class="panel-content">
+        <div v-else-if="store.activeSidebar === 'annotations' && store.featureFlags.notes" class="panel-content">
           <div class="annotation-summary">
             <strong>{{ store.noteCount }}</strong>
             <span>条便签</span>
@@ -183,7 +204,7 @@ function handleSidebarWheel(event: WheelEvent) {
           <div class="empty">当前版本暂未读取文档目录。</div>
         </div>
 
-        <div v-else-if="store.activeSidebar === 'translation'" class="panel-content">
+        <div v-else-if="store.activeSidebar === 'translation' && store.featureFlags.translation" class="panel-content">
           <TranslationPanel />
         </div>
 
@@ -191,9 +212,29 @@ function handleSidebarWheel(event: WheelEvent) {
           <div class="empty">参考文献解析与跳转功能将在后续版本中提供。</div>
         </div>
 
-        <div v-else class="panel-content">
+        <div v-else-if="store.activeSidebar === 'ai' && store.featureFlags.aiChat" class="panel-content">
           <ProviderPanel />
           <div class="feature-card"><i class="fa-solid fa-wand-magic-sparkles"></i><div><strong>AI 功能</strong><p>解释、摘要、问答和论文检索将在后续版本中提供。</p></div></div>
+        </div>
+
+        <div v-else class="panel-content">
+          <section class="settings-panel">
+            <article v-for="feature in featureOptions" :key="feature.key" class="setting-row">
+              <i :class="feature.icon"></i>
+              <div>
+                <strong>{{ feature.label }}</strong>
+                <p>{{ feature.description }}</p>
+              </div>
+              <button
+                class="switch"
+                :class="{ enabled: store.featureFlags[feature.key] }"
+                :aria-pressed="store.featureFlags[feature.key]"
+                @click="store.setFeatureEnabled(feature.key, !store.featureFlags[feature.key])"
+              >
+                <span></span>
+              </button>
+            </article>
+          </section>
         </div>
 
         <div
@@ -220,6 +261,7 @@ function handleSidebarWheel(event: WheelEvent) {
 .rail-button:hover { background: #e8e8e8; }
 .rail-button.active { background: #dedede; color: #262a2f; }
 .rail-button.active::before { content: ''; position: absolute; left: -6px; top: 8px; width: 3px; height: 20px; border-radius: 4px; background: #5f6873; }
+.rail-settings { margin-top: auto; margin-bottom: 8px; }
 .count-badge { position: absolute; right: -3px; top: -2px; min-width: 16px; height: 16px; padding: 0 3px; display: grid; place-items: center; border-radius: 8px; background: #555b62; color: white; font-size: 9px; }
 .sidebar-panel { height: 100%; min-height: 0; background: #fafafa; display: flex; flex-direction: column; border-left: 1px solid #ececec; overflow: hidden; position: relative; }
 .resize-handle { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 2; }
@@ -257,6 +299,15 @@ function handleSidebarWheel(event: WheelEvent) {
 .feature-card i { margin-top: 3px; }
 .feature-card strong { display: block; margin-bottom: 5px; color: #35393e; font-size: 13px; }
 .feature-card p { margin: 0; font-size: 12px; line-height: 1.6; color: #8491a3; }
+.settings-panel { display: grid; gap: 10px; }
+.setting-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px; border: 1px solid #e2e2e2; border-radius: 9px; background: #f7f7f7; color: #555b62; }
+.setting-row > i { color: #656b72; text-align: center; }
+.setting-row strong { display: block; color: #34383d; font-size: 13px; }
+.setting-row p { margin: 4px 0 0; color: #858b92; font-size: 11px; line-height: 1.45; }
+.switch { width: 38px; height: 22px; padding: 2px; border: 0; border-radius: 999px; background: #cfd3d7; cursor: pointer; }
+.switch span { display: block; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgb(0 0 0 / 18%); transition: transform .15s ease; }
+.switch.enabled { background: #4f8f5d; }
+.switch.enabled span { transform: translateX(16px); }
 .sidebar-enter-active, .sidebar-leave-active { transition: width 0.18s ease, opacity 0.18s ease; }
 .sidebar-enter-from, .sidebar-leave-to { width: 0; opacity: 0; }
 @media (max-width: 720px) { .sidebar-panel { position: absolute; left: 48px; top: 0; bottom: 0; box-shadow: 8px 0 24px rgb(15 23 42 / 12%); } }

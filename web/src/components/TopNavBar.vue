@@ -18,7 +18,7 @@ const emit = defineEmits<{
 
 const store = useReaderStore()
 
-const tools: ToolItem[] = [
+const allTools: ToolItem[] = [
   { id: 'cursor', label: '选择文本', icon: 'fa-solid fa-arrow-pointer' },
   { id: 'pen', label: '画笔', icon: 'fa-solid fa-pen' },
   { id: 'highlight', label: '高亮', icon: 'fa-solid fa-highlighter' },
@@ -28,6 +28,7 @@ const tools: ToolItem[] = [
   { id: 'note', label: '便签', icon: 'fa-regular fa-note-sticky' },
 ]
 
+const tools = computed(() => store.featureFlags.notes ? allTools : allTools.filter(tool => tool.id !== 'note'))
 const zoomText = computed(() => `${Math.round(store.scale * 100)}%`)
 const hasDocument = computed(() => store.totalPages > 0)
 const showStyleControls = computed(() =>
@@ -135,7 +136,7 @@ function chooseTool(tool: ToolType) {
       <button class="icon-button" :disabled="!hasDocument" title="关闭文件并更新缩略图" @click="emit('closeFile')">
         <i class="fa-solid fa-xmark"></i>
       </button>
-      <button class="icon-button" :class="{ active: store.aiPanelOpen }" :disabled="!hasDocument" title="AI Chat" @click="store.aiPanelOpen ? store.closeAIChat() : store.openAIChat()">
+      <button v-if="store.featureFlags.aiChat" class="icon-button" :class="{ active: store.aiPanelOpen }" :disabled="!hasDocument" title="AI Chat" @click="store.aiPanelOpen ? store.closeAIChat() : store.openAIChat()">
         <i class="fa-regular fa-comments"></i>
       </button>
       <button class="icon-button" :disabled="!hasDocument" title="保存可编辑工程（Ctrl+S）" @click="emit('saveProject')">

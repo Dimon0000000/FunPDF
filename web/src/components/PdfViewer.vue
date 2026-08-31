@@ -987,6 +987,7 @@ function startPointer(event: PointerEvent, page: number) {
   gestureHistorySaved = false
 
   if (store.activeTool === 'note') {
+    if (!store.featureFlags.notes) return
     openNoteEditor(page, point, local)
     return
   }
@@ -1073,8 +1074,10 @@ function eraseAt(point: PdfPoint, page: number) {
 
 function noteMarkers(page: number) {
   renderRevision.value
+  if (!store.featureFlags.notes) return []
   return (annotations[page] ?? [])
     .filter(annotation => annotation.type === 'note')
+    .filter(annotation => store.featureFlags.translation || annotation.text || !annotation.translations?.length)
     .map(annotation => {
       const point = viewportPoint(annotation.point, page)
       const isTranslation = Boolean(annotation.translations?.length && !annotation.text)
@@ -1182,6 +1185,7 @@ function openSelectedTextNoteEditor() {
 }
 
 async function translateSelectedText() {
+  if (!store.featureFlags.translation) return
   const page = textSelection.value.page
   const sourceText = textSelection.value.text.trim()
   const viewport = pageViewport(page)
@@ -1256,6 +1260,7 @@ async function translateSelectedText() {
 }
 
 function askAIAboutSelection() {
+  if (!store.featureFlags.aiChat) return
   const sourceText = textSelection.value.text.trim()
   if (!sourceText) return
   store.openAIChat(sourceText)
@@ -1719,8 +1724,17 @@ watch(() => store.currentPage, page => {
 }, { flush: 'sync' })
 watch(() => store.activeTool, (tool, previous) => {
   if (tool === 'highlight' && previous === 'cursor' && textSelection.value.open) return highlightSelectedText()
-  if (tool === 'note' && previous === 'cursor' && textSelection.value.open) return openSelectedTextNoteEditor()
+  if (store.featureFlags.notes && tool === 'note' && previous === 'cursor' && textSelection.value.open) return openSelectedTextNoteEditor()
   if (tool !== 'cursor') clearTextSelection(true)
+})
+watch(() => store.featureFlags.notes, enabled => {
+  if (!enabled) {
+    noteEditor.value.open = false
+    if (store.activeTool === 'note') store.activeTool = 'cursor'
+  }
+})
+watch(() => store.featureFlags.translation, enabled => {
+  if (!enabled) translationPopup.value.open = false
 })
 
 onMounted(() => {
@@ -1852,13 +1866,16 @@ onBeforeUnmount(() => {
             <button @click="copySelectedText"><i class="fa-regular fa-copy"></i>复制</button>
             <span></span>
             <button @click="highlightSelectedText"><i class="fa-solid fa-highlighter"></i>高亮</button>
-            <button @click="openSelectedTextNoteEditor"><i class="fa-regular fa-note-sticky"></i>便签</button>
-            <button @click="translateSelectedText"><i class="fa-solid fa-language"></i>翻译</button>
-            <button @click="askAIAboutSelection"><i class="fa-regular fa-comments"></i>问 AI</button>
+            <template v-if="store.featureFlags.notes || store.featureFlags.translation">
+              <span></span>
+              <button v-if="store.featureFlags.notes" @click="openSelectedTextNoteEditor"><i class="fa-regular fa-note-sticky"></i>便签</button>
+              <button v-if="store.featureFlags.translation" @click="translateSelectedText"><i class="fa-solid fa-language"></i>翻译</button>
+            </template>
+            <button v-if="store.featureFlags.aiChat" @click="askAIAboutSelection"><i class="fa-regular fa-comments"></i>问 AI</button>
           </div>
 
           <div
-            v-if="translationPopup.open && translationPopup.page === layout.pageNumber"
+            v-if="store.featureFlags.translation && translationPopup.open && translationPopup.page === layout.pageNumber"
             class="translation-popup"
             :style="{ left: `${translationPopup.left}px`, top: `${translationPopup.top}px`, width: `${translationPopup.width}px` }"
             @pointerdown.stop
@@ -1880,7 +1897,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div
-            v-if="noteEditor.open && noteEditor.page === layout.pageNumber"
+            v-if="store.featureFlags.notes && noteEditor.open && noteEditor.page === layout.pageNumber"
             class="note-editor"
             :style="{ left: `${noteEditor.left}px`, top: `${noteEditor.top}px` }"
             @pointermove="moveNoteEditorDrag"
