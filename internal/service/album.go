@@ -33,6 +33,10 @@ func (s *AlbumService) ListAlbums(ctx context.Context) ([]*entity.Album, error) 
 // CreateAlbum create an album
 func (s *AlbumService) CreateAlbum(ctx context.Context, req *dto.CreateAlbumRequest) (*entity.Album, error) {
 	albumID := common.GenerateUUIDv7()
+	albumName := strings.TrimSpace(req.Name)
+	if albumName == "" {
+		return nil, errors.New("empty album name")
+	}
 
 	// check thumbnail size
 	if err := ValidateBase64ImageSize(req.Thumbnail); err != nil {
@@ -41,7 +45,7 @@ func (s *AlbumService) CreateAlbum(ctx context.Context, req *dto.CreateAlbumRequ
 
 	album := &entity.Album{
 		ID:          albumID,
-		Name:        strings.TrimSpace(req.Name),
+		Name:        albumName,
 		Thumbnail:   req.Thumbnail,
 		Description: req.Description,
 	}
