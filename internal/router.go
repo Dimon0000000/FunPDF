@@ -58,7 +58,6 @@ func (r *Router) Setup(e *gin.Engine) {
 
 			album.POST("/:album_id/files", r.albumHandler.UploadFilesToAlbum)
 			album.DELETE("/:album_id/files", r.albumHandler.DeleteFilesFromAlbum)
-			// album.DELETE("/:album_id/files/delete", r.albumHandler.HardDeleteFilesFromAlbum) TODO: will be added in v0.2.x
 		}
 
 		translator := api.Group("/translators")
