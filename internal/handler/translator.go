@@ -39,7 +39,7 @@ func (h *TranslatorHandler) ListTranslators(c *gin.Context) {
 
 // CreateTranslator create a unique translators
 func (h *TranslatorHandler) CreateTranslator(c *gin.Context) {
-	var req *dto.CreateTranslatorsRequest
+	var req dto.CreateTranslatorsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    http.StatusBadRequest,
@@ -48,7 +48,7 @@ func (h *TranslatorHandler) CreateTranslator(c *gin.Context) {
 		return
 	}
 
-	translator, err := h.transSvr.CreateTranslator(c.Request.Context(), req)
+	translator, err := h.transSvr.CreateTranslator(c.Request.Context(), &req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    http.StatusInternalServerError,

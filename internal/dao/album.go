@@ -116,5 +116,3 @@ func (d *AlbumDAO) DeleteFilesFromAlbum(ctx context.Context, db *gorm.DB, albumI
 		Delete(&entity.AlbumFile{})
 	return result.RowsAffected, result.Error
 }
-
-// DeleteFilesFromAlbum delete a batch of files from album
