@@ -49,6 +49,10 @@ function printPdf() {
   void viewerRef.value?.printPdf()
 }
 
+async function getDocumentContext() {
+  return viewerRef.value?.getDocumentContext()
+}
+
 </script>
 
 <template>
@@ -69,7 +73,7 @@ function printPdf() {
     <section class="reader-body">
       <LeftSidebar />
       <PdfViewer ref="viewerRef" />
-      <AIChatPanel v-show="store.aiPanelOpen && store.totalPages" />
+      <AIChatPanel v-show="store.featureFlags.aiChat && store.aiPanelOpen && store.totalPages" :get-document-context="getDocumentContext" />
     </section>
   </main>
 </template>

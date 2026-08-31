@@ -2,6 +2,16 @@ import { defineStore } from 'pinia'
 import type { ToolType } from '@/types/pdf'
 
 const SIDEBAR_STORAGE_KEY = 'funpdf.sidebarOpen'
+const FEATURE_FLAGS_STORAGE_KEY = 'funpdf.featureFlags'
+
+export type ReaderFeatureKey = 'aiChat' | 'translation' | 'notes'
+type ReaderFeatureFlags = Record<ReaderFeatureKey, boolean>
+
+const DEFAULT_FEATURE_FLAGS: ReaderFeatureFlags = {
+  aiChat: true,
+  translation: true,
+  notes: true,
+}
 
 function initialSidebarState() {
   if (typeof window === 'undefined') return false
@@ -9,6 +19,25 @@ function initialSidebarState() {
     return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
   } catch {
     return false
+  }
+}
+
+function initialFeatureFlags(): ReaderFeatureFlags {
+  if (typeof window === 'undefined') return { ...DEFAULT_FEATURE_FLAGS }
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(FEATURE_FLAGS_STORAGE_KEY) || '{}') as Partial<ReaderFeatureFlags> & { annotations?: boolean }
+    const notes = typeof saved.notes === 'boolean'
+      ? saved.notes
+      : typeof saved.annotations === 'boolean'
+        ? saved.annotations
+        : true
+    return {
+      aiChat: typeof saved.aiChat === 'boolean' ? saved.aiChat : true,
+      translation: typeof saved.translation === 'boolean' ? saved.translation : true,
+      notes,
+    }
+  } catch {
+    return { ...DEFAULT_FEATURE_FLAGS }
   }
 }
 
@@ -36,6 +65,7 @@ export const useReaderStore = defineStore('reader', {
     activeCachedFileId: '',
     aiPanelOpen: false,
     aiQuote: '',
+    featureFlags: initialFeatureFlags(),
   }),
   actions: {
     toggleSidebar() {
@@ -84,6 +114,21 @@ export const useReaderStore = defineStore('reader', {
     },
     closeAIChat() {
       this.aiPanelOpen = false
+    },
+    setFeatureEnabled(key: ReaderFeatureKey, enabled: boolean) {
+      this.featureFlags[key] = enabled
+      if (!enabled && key === 'aiChat') this.closeAIChat()
+      if (!enabled && key === 'notes' && this.activeTool === 'note') this.activeTool = 'cursor'
+      if (!enabled && ((key === 'aiChat' && this.activeSidebar === 'ai')
+        || (key === 'translation' && this.activeSidebar === 'translation')
+        || (key === 'notes' && this.activeSidebar === 'annotations'))) {
+        this.activeSidebar = 'settings'
+      }
+      try {
+        window.localStorage.setItem(FEATURE_FLAGS_STORAGE_KEY, JSON.stringify(this.featureFlags))
+      } catch {
+        // Ignore unavailable storage.
+      }
     },
   },
 })
