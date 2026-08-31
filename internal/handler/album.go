@@ -226,6 +226,3 @@ func (h *AlbumHandler) DeleteFilesFromAlbum(c *gin.Context) {
 
 	c.Status(http.StatusNoContent)
 }
-
-// HardDeleteFilesFromAlbum TODO: will be added in v0.2.x
-func (h *AlbumHandler) HardDeleteFilesFromAlbum(c *gin.Context) {}

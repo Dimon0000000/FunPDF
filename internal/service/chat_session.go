@@ -135,50 +135,41 @@ func (s *ChatSessionService) SendMessages(ctx context.Context, providerID, sessi
 		MaxTokens:   req.MaxTokens,
 		Effort:      req.Effort,
 	}
-	resp, err := s.modelSrv.ChatToModel(ctx, providerID, session.ModelName, session.ModelID, messages, models.ModelConfig{}, chatCfg, sender)
-	if err != nil {
-		return nil, err
-	}
-
-	answer := ""
-	if resp != nil && resp.Answer != nil {
-		answer = *resp.Answer
-	}
-	assistantMessage := models.Message{
-		Role:    "assistant",
-		Content: answer,
-	}
 
 	userDialog := entity.Dialog{
 		ID:        common.GenerateUUID(),
 		SessionID: sessionID,
 		Message:   userMessage,
-		Status:    1,
+		Status:    0,
 	}
 	assistantDialog := entity.Dialog{
 		ID:        common.GenerateUUID(),
 		SessionID: sessionID,
-		Message:   assistantMessage,
-		Status:    1,
+		Message:   models.Message{Role: "assistant"},
+		Status:    0,
 	}
-	if err = s.dialogDAO.SaveDialog(ctx, dao.DB, userDialog, assistantDialog); err != nil {
+
+	resp, err := s.modelSrv.ChatToModel(ctx, providerID, session.ModelName, session.ModelID, messages, models.ModelConfig{}, chatCfg, sender)
+	if err != nil {
+		if saveErr := s.dialogDAO.SaveDialog(ctx, dao.DB, userDialog, assistantDialog); saveErr != nil {
+			return nil, saveErr
+		}
 		return nil, err
 	}
 
-	return resp, nil
-}
+	userDialog.Status = 1
 
-// UpdateDialogStatus TODO add status `0` for failed chat
-func (s *ChatSessionService) UpdateDialogStatus(ctx context.Context, dialogID string, req *dto.UpdateDialogStatusRequest) error {
-	if req.Status != 0 && req.Status != 1 {
-		return errors.New("invalid request parameter")
+	answer := ""
+	if resp != nil && resp.Answer != nil {
+		answer = *resp.Answer
 	}
-	oldStatus, err := s.chatSessionDAO.GetDialogStatus(ctx, dao.DB, dialogID)
-	if err != nil {
-		return err
+	assistantDialog.Message = models.Message{Role: "assistant", Content: answer}
+	if answer != "" {
+		assistantDialog.Status = 1
 	}
-	if oldStatus == req.Status {
-		return fmt.Errorf("dialog status is already %d", req.Status)
+
+	if err = s.dialogDAO.SaveDialog(ctx, dao.DB, userDialog, assistantDialog); err != nil {
+		return nil, err
 	}
-	return s.chatSessionDAO.UpdateDialogStatus(ctx, dao.DB, dialogID, req.Status)
+	return resp, nil
 }
