@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import { apiErrorMessage } from '@/api/http'
 import { createChatSession, deleteChatSession, streamChatMessage } from '@/api/chat'
 import { listProviderModels, listProviders } from '@/api/providers'
 import type { Provider, ProviderModel } from '@/api/types'
 import { useReaderStore } from '@/stores/reader'
+
+defineProps<{
+  getDocumentContext?: () => Promise<{ name: string; content: string } | undefined>
+}>()
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string; quote?: string; reasoning?: string }
 type PdfSession = { id: string; providerId: string; modelId: string; modelName: string; fileId: string; messages: ChatMessage[] }
@@ -39,6 +45,15 @@ const chatConfig = computed(() => ({
   thinking: thinking.value,
   effort: effort.value,
 }))
+
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+})
+
+function renderMarkdown(content: string) {
+  return DOMPurify.sanitize(marked.parse(content || '', { async: false }) as string)
+}
 
 async function loadProviders() {
   error.value = ''
@@ -226,8 +241,16 @@ onBeforeUnmount(() => {
       </div>
       <article v-for="(message, index) in messages" :key="index" :class="message.role">
         <blockquote v-if="message.quote">{{ message.quote }}</blockquote>
-        <details v-if="message.reasoning"><summary>思考过程</summary><p>{{ message.reasoning }}</p></details>
-        <p>{{ message.content || (loading && index === messages.length - 1 ? '正在思考…' : '') }}</p>
+        <details v-if="message.reasoning">
+          <summary>思考过程</summary>
+          <div class="markdown-body reasoning-body" v-html="renderMarkdown(message.reasoning)"></div>
+        </details>
+        <div
+          v-if="message.role === 'assistant'"
+          class="markdown-body"
+          v-html="renderMarkdown(message.content || (loading && index === messages.length - 1 ? '正在思考…' : ''))"
+        ></div>
+        <p v-else>{{ message.content }}</p>
       </article>
     </div>
 
@@ -277,6 +300,16 @@ article p { margin: 0; }
 article blockquote { margin: 0 0 7px; padding: 6px 8px; border-left: 2px solid #7b8793; background: rgb(255 255 255 / 50%); color: #66717d; font-size: 10px; }
 details { margin-bottom: 7px; color: #737b84; font-size: 10px; }
 details p { margin-top: 5px; }
+.markdown-body { white-space: normal; overflow-wrap: anywhere; }
+.markdown-body :deep(p) { margin: 0 0 7px; }
+.markdown-body :deep(p:last-child) { margin-bottom: 0; }
+.markdown-body :deep(ul), .markdown-body :deep(ol) { margin: 4px 0 8px; padding-left: 18px; }
+.markdown-body :deep(li) { margin: 2px 0; }
+.markdown-body :deep(pre) { max-width: 100%; overflow: auto; margin: 7px 0; padding: 8px; border-radius: 6px; background: #f8fafc; font-size: 11px; line-height: 1.45; }
+.markdown-body :deep(code) { padding: 1px 4px; border-radius: 4px; background: rgb(15 23 42 / 7%); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+.markdown-body :deep(pre code) { padding: 0; background: transparent; }
+.markdown-body :deep(blockquote) { margin: 6px 0; padding: 5px 8px; border-left: 2px solid #9aa4af; background: rgb(255 255 255 / 55%); color: #5f6974; }
+.reasoning-body { color: #68727d; font-size: 10px; }
 .chat-error { margin: 0 12px 8px; color: #a33d3d; font-size: 11px; }
 .composer { margin: 0 10px 10px; padding: 8px; border: 1px solid #d7d7d7; border-radius: 10px; background: white; }
 .composer textarea { width: 100%; resize: none; border: 0; outline: 0; color: #40454a; font: 12px/1.5 inherit; }
