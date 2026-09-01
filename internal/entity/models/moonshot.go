@@ -10,12 +10,12 @@ import (
 	"net/http"
 )
 
-type DeepSeekModel struct {
+type MoonShotModel struct {
 	BaseModel
 }
 
-func (d *DeepSeekModel) Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg *ChatConfig, messages []Message, modelName string, sender func(*string, *string) error) (*dto.ChatResponse, error) {
-	url := fmt.Sprintf("%s/%s", d.BaseURL, d.URLSuffix)
+func (m *MoonShotModel) Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg *ChatConfig, messages []Message, modelName string, sender func(*string, *string) error) (*dto.ChatResponse, error) {
+	url := fmt.Sprintf("%s/%s", m.BaseURL, m.URLSuffix)
 
 	isStream := chatCfg != nil && chatCfg.Stream != nil && *chatCfg.Stream
 	reqBody := map[string]any{
@@ -40,13 +40,13 @@ func (d *DeepSeekModel) Chat(ctx context.Context, modelCfg *ModelConfig, chatCfg
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", *modelCfg.APIKey))
 
 	if isStream {
-		return doStreamChat(d.HTTPClient, req, d.Name(), sender)
+		return doStreamChat(m.HTTPClient, req, m.Name(), sender)
 	}
-	return doNoneStreamChat(d.HTTPClient, req, d.Name())
+	return doNoneStreamChat(m.HTTPClient, req, m.Name())
 }
 
-func (d *DeepSeekModel) ListModels(ctx context.Context, modelCfg *ModelConfig) (*[]dto.ListModelsResponse, error) {
-	url := fmt.Sprintf("%s/%s", d.BaseURL, d.URLSuffix)
+func (m *MoonShotModel) ListModels(ctx context.Context, modelCfg *ModelConfig) (*[]dto.ListModelsResponse, error) {
+	url := fmt.Sprintf("%s/%s", m.BaseURL, m.URLSuffix)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -56,7 +56,7 @@ func (d *DeepSeekModel) ListModels(ctx context.Context, modelCfg *ModelConfig) (
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", *modelCfg.APIKey))
 
-	client := d.HTTPClient
+	client := m.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -100,6 +100,6 @@ func (d *DeepSeekModel) ListModels(ctx context.Context, modelCfg *ModelConfig) (
 	return &models, nil
 }
 
-func (d *DeepSeekModel) Name() string {
-	return "DeepSeek"
+func (m *MoonShotModel) Name() string {
+	return "MoonShot"
 }

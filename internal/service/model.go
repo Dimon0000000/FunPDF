@@ -141,6 +141,14 @@ func (s *ModelService) ChatToModel(ctx context.Context, providerID, modelName, m
 				HTTPClient: s.httpClient,
 			},
 		}).Chat(ctx, &modelCfg, &chatCfg, messages, modelName, streamSender)
+	case "moonshot":
+		return (&models.MoonShotModel{
+			BaseModel: models.BaseModel{
+				BaseURL:    strings.TrimRight(provider.BaseURL, "/"),
+				URLSuffix:  strings.TrimLeft(provider.URLSuffix["chat"], "/"),
+				HTTPClient: s.httpClient,
+			},
+		}).Chat(ctx, &modelCfg, &chatCfg, messages, modelName, streamSender)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedProvider, provider.Name)
 	}
@@ -166,6 +174,14 @@ func (s *ModelService) ListSupportedModels(ctx context.Context, providerID strin
 	switch strings.ToLower(strings.TrimSpace(provider.Name)) {
 	case "deepseek":
 		return (&models.DeepSeekModel{
+			BaseModel: models.BaseModel{
+				BaseURL:    strings.TrimRight(provider.BaseURL, "/"),
+				URLSuffix:  strings.TrimLeft(provider.URLSuffix["models"], "/"),
+				HTTPClient: s.httpClient,
+			},
+		}).ListModels(ctx, &modelCfg)
+	case "moonshot":
+		return (&models.MoonShotModel{
 			BaseModel: models.BaseModel{
 				BaseURL:    strings.TrimRight(provider.BaseURL, "/"),
 				URLSuffix:  strings.TrimLeft(provider.URLSuffix["models"], "/"),

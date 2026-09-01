@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func doStreamChat(client *http.Client, req *http.Request, sender func(*string, *string) error) (*dto.ChatResponse, error) {
+func doStreamChat(client *http.Client, req *http.Request, providerName string, sender func(*string, *string) error) (*dto.ChatResponse, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -63,7 +63,14 @@ func doStreamChat(client *http.Client, req *http.Request, sender func(*string, *
 				}
 			}
 		}
-		if content, ok := delta["reasoning_content"].(string); ok {
+
+		reasoningFiled := ""
+		switch providerName {
+		case "DeepSeek", "MoonShot":
+			reasoningFiled = "reasoning_content"
+		}
+
+		if content, ok := delta[reasoningFiled].(string); ok {
 			reasonContent.WriteString(content)
 			if sender != nil {
 				if err := sender(nil, &content); err != nil {
@@ -84,7 +91,7 @@ func doStreamChat(client *http.Client, req *http.Request, sender func(*string, *
 	}, nil
 }
 
-func doNoneStreamChat(client *http.Client, req *http.Request) (*dto.ChatResponse, error) {
+func doNoneStreamChat(client *http.Client, req *http.Request, providerName string) (*dto.ChatResponse, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -119,8 +126,14 @@ func doNoneStreamChat(client *http.Client, req *http.Request) (*dto.ChatResponse
 		return nil, fmt.Errorf(`"message" is invalid`)
 	}
 
+	reasoningFiled := ""
+	switch providerName {
+	case "DeepSeek", "MoonShot":
+		reasoningFiled = "reasoning_content"
+	}
+
 	answerText, _ := message["content"].(string)
-	reasonText, _ := message["reasoning_content"].(string)
+	reasonText, _ := message[reasoningFiled].(string)
 	return &dto.ChatResponse{
 		Answer:        &answerText,
 		ReasonContent: &reasonText,
