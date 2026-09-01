@@ -128,7 +128,7 @@ func doNoneStreamChat(client *http.Client, req *http.Request, providerName strin
 
 	reasoningFiled := ""
 	switch providerName {
-	case "DeepSeek", "MoonShot":
+	case "DeepSeek", "MoonShot", "SiliconFlow, Aliyun":
 		reasoningFiled = "reasoning_content"
 	}
 
@@ -190,4 +190,56 @@ func implementDeepSeekChatConfig(chatCfg *ChatConfig, reqBody map[string]any) {
 		reqBody["max_tokens"] = *chatCfg.MaxTokens
 	}
 
+}
+
+func implementMoonShotConfig(chatCfg *ChatConfig, reqBody map[string]any) {
+	if chatCfg.Stream != nil && *chatCfg.Stream {
+		reqBody["stream"] = true
+	}
+
+	if chatCfg.Thinking != nil && *chatCfg.Thinking {
+		reqBody["thinking"] = true
+	} else {
+		reqBody["thinking"] = false
+	}
+
+	if chatCfg.Effort != nil {
+		reqBody["reasoning_effort"] = *chatCfg.Effort
+	}
+
+	if chatCfg.Temperature != nil {
+		reqBody["temperature"] = *chatCfg.Temperature
+	}
+
+	if chatCfg.TopP != nil {
+		reqBody["top_p"] = *chatCfg.TopP
+	}
+
+	if chatCfg.MaxTokens != nil {
+		reqBody["max_tokens"] = *chatCfg.MaxTokens
+	}
+}
+
+func implementSiliconFlowConfig(chatCfg *ChatConfig, reqBody map[string]any) {
+	if chatCfg.Stream != nil && *chatCfg.Stream {
+		reqBody["stream"] = true
+	}
+
+	if chatCfg.Thinking != nil && *chatCfg.Thinking {
+		reqBody["enable_thinking"] = true
+	} else {
+		reqBody["enable_thinking"] = false
+	}
+
+	if chatCfg.Temperature != nil {
+		reqBody["temperature"] = *chatCfg.Temperature
+	}
+
+	if chatCfg.TopP != nil {
+		reqBody["top_p"] = *chatCfg.TopP
+	}
+
+	if chatCfg.MaxTokens != nil {
+		reqBody["max_tokens"] = *chatCfg.MaxTokens
+	}
 }
