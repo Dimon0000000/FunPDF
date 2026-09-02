@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,16 +19,11 @@ import (
 )
 
 type FileService struct {
-	fileDAO  *dao.FileDAO
-	cacheDir string
+	fileDAO *dao.FileDAO
 }
 
 func NewFileService() *FileService {
-	return NewFileServiceWithCacheDir("./Cache")
-}
-
-func NewFileServiceWithCacheDir(cacheDir string) *FileService {
-	return &FileService{fileDAO: dao.NewFileDAO(), cacheDir: cacheDir}
+	return &FileService{fileDAO: dao.NewFileDAO()}
 }
 
 // ListFiles List all files in local
@@ -43,7 +39,10 @@ func (s *FileService) GetFile(ctx context.Context, fileID string) (string, error
 		return "", err
 	}
 
-	filePath := filepath.Join(s.cacheDir, fileRecord.FileStorageKey, "source.pdf")
+	cacheMigrationMu.RLock()
+	defer cacheMigrationMu.RUnlock()
+
+	filePath := filepath.Join(CurrentCacheDir(), fileRecord.FileStorageKey, "source.pdf")
 	go func(fileID, path string) {
 		if _, ok := engine.PDFText.Get(fileID); ok {
 			return
@@ -67,7 +66,10 @@ func (s *FileService) GetFileState(ctx context.Context, fileID string) (json.Raw
 		return nil, err
 	}
 
-	filePath := filepath.Join(s.cacheDir, fileRecord.FileStorageKey, "editor-state.json")
+	cacheMigrationMu.RLock()
+	defer cacheMigrationMu.RUnlock()
+
+	filePath := filepath.Join(CurrentCacheDir(), fileRecord.FileStorageKey, "editor-state.json")
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -106,7 +108,11 @@ func (s *FileService) SaveFile(ctx context.Context, fileID string, req *dto.Save
 	if projectDir == "" {
 		return false, fmt.Errorf("file location is empty")
 	}
-	stateDir := filepath.Join(s.cacheDir, projectDir)
+
+	cacheMigrationMu.RLock()
+	defer cacheMigrationMu.RUnlock()
+
+	stateDir := filepath.Join(CurrentCacheDir(), projectDir)
 	statePath := filepath.Join(stateDir, "editor-state.json")
 	bakPath := statePath + ".bak"
 
@@ -182,11 +188,14 @@ func (s *FileService) SaveFile(ctx context.Context, fileID string, req *dto.Save
 func (s *FileService) UploadFile(ctx context.Context, req *dto.UploadFileRequest, source io.Reader) (_ *entity.File, resultErr error) {
 	fileID := common.GenerateUUIDv7()
 
-	if err := os.MkdirAll(s.cacheDir, 0700); err != nil {
+	cacheMigrationMu.RLock()
+	defer cacheMigrationMu.RUnlock()
+
+	if err := os.MkdirAll(CurrentCacheDir(), 0700); err != nil {
 		return nil, err
 	}
 
-	tempDir, err := os.MkdirTemp(s.cacheDir, "."+fileID+"-")
+	tempDir, err := os.MkdirTemp(CurrentCacheDir(), "."+fileID+"-")
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +234,7 @@ func (s *FileService) UploadFile(ctx context.Context, req *dto.UploadFileRequest
 		return nil, err
 	}
 
-	finalDir := filepath.Join(s.cacheDir, fileID)
+	finalDir := filepath.Join(CurrentCacheDir(), fileID)
 	if err := os.Rename(tempDir, finalDir); err != nil {
 		return nil, err
 	}
@@ -284,16 +293,22 @@ func (s *FileService) DeleteFile(ctx context.Context, fileID string) (int64, err
 	if projectDir == "" {
 		return 0, fmt.Errorf("file location is empty")
 	}
-	srcDir := filepath.Join(s.cacheDir, projectDir)
 
-	trashDir := filepath.Join(s.cacheDir, ".trash")
+	cacheMigrationMu.RLock()
+	defer cacheMigrationMu.RUnlock()
+
+	srcDir := filepath.Join(CurrentCacheDir(), projectDir)
+
+	trashDir := filepath.Join(CurrentCacheDir(), ".trash")
 	trashPath := filepath.Join(trashDir, fileID)
 
 	if err := os.MkdirAll(trashDir, 0700); err != nil {
 		return 0, fmt.Errorf("create trash dir failed: %v", err)
 	}
 	if err := os.Rename(srcDir, trashPath); err != nil {
-		return 0, fmt.Errorf("move to trash failed: %v", err)
+		if !errors.Is(err, os.ErrNotExist) {
+			return 0, fmt.Errorf("move to trash failed: %v", err)
+		}
 	}
 
 	affected, err := s.fileDAO.DeleteFile(ctx, fileID, dao.DB)
