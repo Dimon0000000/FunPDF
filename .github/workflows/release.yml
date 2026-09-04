@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   release:
-    if: github.ref_type == 'tag' && github.ref_protected
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
